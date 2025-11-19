@@ -7,12 +7,16 @@ from datetime import datetime
 def get_yields_table():
     url = "https://www.boursorama.com/bourse/taux/"
     headers = {"User-Agent": "Mozilla/5.0"}
-    r = requests.get(url, headers=headers)
-    soup = BeautifulSoup(r.text, "html.parser")
 
+    try:
+        r = requests.get(url, headers=headers, timeout=10)
+        r.raise_for_status()
+    except Exception as e:
+        raise RuntimeError(f"Erreur lors du chargement des taux Boursorama : {e}")
+
+    soup = BeautifulSoup(r.text, "html.parser")
     tables = soup.find_all("table")
 
-    # Chercher la table des taux souverains
     target = None
     for t in tables:
         txt = t.get_text(separator=" ").lower()
@@ -20,22 +24,34 @@ def get_yields_table():
             target = t
             break
 
-    df = pd.read_html(str(target))[0]
+    if target is None:
+        raise RuntimeError("Impossible de trouver la table des taux France dans la page.")
 
+    df = pd.read_html(str(target))[0]
     return df
+
 
 def get_france_yields():
     df = get_yields_table()
 
-    # On garde uniquement la ligne France
-    fr = df[df.iloc[:,0].str.lower() == "france"].copy()
+    # Filtre de la ligne France (nettoyage)
+    fr = df[df.iloc[:, 0].str.lower().str.strip() == "france"].copy()
 
-    # On renomme proprement
+    if fr.empty:
+        raise RuntimeError("La ligne 'France' n’a pas été trouvée dans le tableau.")
+
+    # Renommage standardisé
     fr.columns = ["Pays", "2A", "5A", "7A", "10A", "15A", "20A", "30A"]
 
-    # Remplacement des virgules par des points
+    # Nettoyage des taux : "2,15%" → 2.15
     for col in fr.columns[1:]:
-        fr[col] = fr[col].str.replace("%", "").str.replace(",", ".").astype(float)
+        fr[col] = (
+            fr[col]
+            .astype(str)
+            .str.replace("%", "")
+            .str.replace(",", ".")
+            .astype(float)
+        )
 
     return fr
 
@@ -43,11 +59,14 @@ def get_france_yields():
 def refresh_loop():
     while True:
         print(f"\n=== Refresh @ {datetime.now().strftime('%H:%M:%S')} ===")
+        try:
+            df = get_france_yields()
+            print(df)
+        except Exception as e:
+            print(f"Erreur : {e}")
 
-        df = get_france_yields()
-        print(df)
+        time.sleep(5 * 60)  # rafraîchissement toutes les 5 minutes
 
-        time.sleep(5 * 60)  # 5 minutes
 
 if __name__ == "__main__":
     refresh_loop()
