@@ -17,28 +17,21 @@ from modules.finnhub_api import get_live_price, get_history
 try:
     API_KEY = st.secrets["FINNHUB_API_KEY"]
 
-except Exception:
-    st.error("""
-    ❌ Impossible de trouver la clé API Finnhub.
-
-    👉 Tu dois créer un fichier `.streamlit/secrets.toml` contenant :
-
-    FINNHUB_API_KEY = "ta_clé_api"
-    """)
-    API_KEY = None
-
 except KeyError:
     st.error("""
-    ❌ Le fichier `.finnhub/secrets.toml` existe mais la clé API manque.
+    Clé API Finnhub manquante.
 
-    Ajoute :
+    ➜ Va dans Streamlit Cloud :
+      Settings → Secrets
+
+    Et ajoute :
 
     FINNHUB_API_KEY = "ta_clé_api"
     """)
     API_KEY = None
 
 except Exception as e:
-    st.error(f"Erreur lors du chargement de la clé API : {e}")
+    st.error(f"Erreur inattendue lors du chargement de la clé API : {e}")
     API_KEY = None
 
 
