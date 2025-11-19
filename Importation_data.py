@@ -27,7 +27,7 @@ def get_yields_table():
     if target is None:
         raise RuntimeError("Impossible de trouver la table des taux France dans la page.")
 
-    df = pd.read_html(str(target))[0]
+    df = pd.read_html(str(target), flavor="html5lib")[0]
     return df
 
 
