@@ -1,8 +1,8 @@
-streamlit
+streamlit==1.39.0
 pandas
 numpy
 plotly
-finnhub-python
+finnhub-python==2.4.18
 beautifulsoup4
 requests
 scikit-learn
