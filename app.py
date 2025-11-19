@@ -1,60 +1,50 @@
-"""
-import streamlit as st
-import numpy as np
-import pandas as pd
-import plotly.express as px
-
-# ---------------------------------------------------------
-#         MINI PLATFORME STREAMLIT DE BASE
-# ---------------------------------------------------------
-
-# Titre principal
-st.title("Mini Financial Dashboard (Local Version)")
-
-# -----------------------------------------
-# SECTION 1 — INPUT UTILISATEUR
-# -----------------------------------------
-st.header("Entrée utilisateur")
-user_text = st.text_input("Tape quelque chose :", value="Hello Streamlit !")
-st.write("Tu as écrit :", user_text)
-
-# -----------------------------------------
-# SECTION 2 — GRAPHIQUE SIMPLE
-# -----------------------------------------
-st.header("Exemple de graphique")
-
-# Création de données
-x = np.linspace(0, 10, 200)
-y = np.sin(x)
-
-df = pd.DataFrame({"x": x, "Signal": y})
-
-fig = px.line(df, x="x", y="Signal", title="Exemple : sin(x)")
-st.plotly_chart(fig, use_container_width=True)
-
-# -----------------------------------------
-# SECTION 3 — BOUTON DYNAMIQUE
-# -----------------------------------------
-st.header("⚡ Action avec bouton")
-
-if st.button("Clique ici"):
-    st.success("Le bouton fonctionne !")
-else:
-    st.info("Appuie sur le bouton")
-
-# -----------------------------------------
-# SECTION 4 — Rafraîchissement automatique (option)
-# -----------------------------------------
-st.empty()
-"""
 import streamlit as st
 import Importation_data
 import plotly.express as px
 import pandas as pd
 
+# ---------------------------------------------------------
+# FIX STREAMLIT — set_page_config doit être en premier !
+# ---------------------------------------------------------
 st.set_page_config(page_title="Quant Dashboard", layout="wide")
 
+# Import Finnhub API module
+from modules.finnhub_api import get_live_price, get_history
+
+# ---------------------------------------------------------
+# Chargement simple et sécurisé de la clé API Finnhub
+# ---------------------------------------------------------
+try:
+    API_KEY = st.secrets["FINNHUB_API_KEY"]
+
+except Exception:
+    st.error("""
+    ❌ Impossible de trouver la clé API Finnhub.
+
+    👉 Tu dois créer un fichier `.streamlit/secrets.toml` contenant :
+
+    FINNHUB_API_KEY = "ta_clé_api"
+    """)
+    API_KEY = None
+
+except KeyError:
+    st.error("""
+    ❌ Le fichier `.finnhub/secrets.toml` existe mais la clé API manque.
+
+    Ajoute :
+
+    FINNHUB_API_KEY = "ta_clé_api"
+    """)
+    API_KEY = None
+
+except Exception as e:
+    st.error(f"Erreur lors du chargement de la clé API : {e}")
+    API_KEY = None
+
+
+# ---------------------------------------------------------
 # Sidebar navigation
+# ---------------------------------------------------------
 page = st.sidebar.selectbox(
     "Navigation",
     ["🏠 Accueil", "📈 Single Asset", "📊 Portfolio", "🇫🇷 Taux France"]
@@ -73,13 +63,36 @@ if page == "🏠 Accueil":
 # ------------------------------
 elif page == "📈 Single Asset":
     st.title("Analyse d’un Actif Unique")
-    st.write("Cette page affichera :")
-    st.markdown("""
-    - Données live API (Finnhub)  
-    - Graphique des prix  
-    - Backtests  
-    - Indicateurs (Sharpe, Max Drawdown, etc.)  
-    """)
+
+    if API_KEY is None:
+        st.warning("⚠️ Configure ta clé API dans `.finnhub/secrets.toml`.")
+        st.stop()
+
+    symbol = st.text_input("🔎 Ticker :", "AAPL")
+
+    # Prix en direct
+    if st.button("📡 Prix live"):
+        price = get_live_price(symbol, API_KEY)
+        if price:
+            st.success(f"Prix actuel de {symbol} : {price} USD")
+        else:
+            st.error("Erreur de récupération du prix via Finnhub.")
+
+    # Historique OHLC
+    if st.button("📈 Charger l'historique"):
+        df_hist = get_history(symbol, API_KEY, resolution="D", count=200)
+        if df_hist is not None:
+            st.dataframe(df_hist, use_container_width=True)
+
+            fig = px.line(
+                df_hist,
+                x="Date",
+                y="Close",
+                title=f"Historique des prix — {symbol}"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.error("Impossible de récupérer les données historiques.")
 
 
 # ------------------------------
@@ -87,13 +100,7 @@ elif page == "📈 Single Asset":
 # ------------------------------
 elif page == "📊 Portfolio":
     st.title("Analyse Portefeuille Multi-Actifs")
-    st.write("Cette page affichera :")
-    st.markdown("""
-    - Sélection multi-actifs  
-    - Matrice de corrélation  
-    - Allocation et rebalancing  
-    - Performance cumulée  
-    """)
+    st.write("En cours de développement...")
 
 
 # ------------------------------
@@ -102,27 +109,23 @@ elif page == "📊 Portfolio":
 elif page == "🇫🇷 Taux France":
     st.title("🇫🇷 Courbe des taux — France (Live Boursorama)")
 
-    # Bouton refresh manuel
     if st.button("🔄 Rafraîchir maintenant"):
         st.cache_data.clear()
         st.success("Données mises à jour !")
 
-    @st.cache_data(ttl=300)  # ⏳ Auto-refresh toutes les 5 minutes
+    @st.cache_data(ttl=300)
     def load_france_yields():
         return Importation_data.get_france_yields()
 
     try:
         df = load_france_yields()
-        st.subheader("📄 Données brutes")
         st.dataframe(df, use_container_width=True)
 
-        # Graphique Yield Curve
         fig = px.line(
-            df.T.iloc[1:],  # ignore la colonne Pays
+            df.T.iloc[1:],
             title="Courbe des taux — France",
             labels={"index": "Maturité", "value": "Taux (%)"},
         )
-        st.subheader("📈 Courbe des taux")
         st.plotly_chart(fig, use_container_width=True)
 
     except Exception as e:

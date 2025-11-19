@@ -5,3 +5,5 @@ python3 -m pip list
 pip freeze > requirements.txt
 
 streamlit run app.py
+
+mkdir -p .finnhub/secrets.toml
