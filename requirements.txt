@@ -7,6 +7,4 @@ beautifulsoup4
 requests
 scikit-learn
 lightgbm
-catboost
 yfinance
-matplotlib
