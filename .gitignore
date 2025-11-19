@@ -1,0 +1,46 @@
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pdb
+*.egg-info/
+*.egg
+*.log
+
+# --- Virtual Environment ---
+venv/
+.env/
+.env_local/
+.venv/
+
+# --- Jupyter Notebooks ---
+.ipynb_checkpoints/
+
+# --- Streamlit ---
+.streamlit/secrets.toml
+.streamlit/.credentials/
+
+# --- MacOS ---
+.DS_Store
+
+# --- IDE / Editors ---
+.vscode/
+.idea/
+
+# --- Data ---
+data/
+*.csv
+*.sqlite
+*.db
+
+# --- Credentials / API keys ---
+*.key
+*.pem
+*.crt
+*.token
+*.env
+
+# --- Cache ---
+.cache/
+
