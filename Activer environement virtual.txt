@@ -2,7 +2,9 @@ source venv/bin/activate
 
 pip install --upgrade pip
 python3 -m pip list
-pip freeze > requirements.txt
+
+pip freeze > requirements_dev.txt
+pip install -r requirements_dev.txt
 
 streamlit run app.py
 
