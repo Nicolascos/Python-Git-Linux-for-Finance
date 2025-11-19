@@ -58,7 +58,7 @@ elif page == "📈 Single Asset":
     st.title("Analyse d’un Actif Unique")
 
     if API_KEY is None:
-        st.warning("⚠️ Configure ta clé API dans `.finnhub/secrets.toml`.")
+        st.warning("⚠️ Configure ta clé API dans `.streamlit/secrets.toml`.")
         st.stop()
 
     symbol = st.text_input("🔎 Ticker :", "AAPL")
