@@ -21,10 +21,6 @@ venv/
 .streamlit/secrets.toml
 .streamlit/.credentials/
 
-# --- Finnhub ---
-.finnhub/secrets.toml
-.finnhub/.credentials/
-
 # --- MacOS ---
 .DS_Store
 
