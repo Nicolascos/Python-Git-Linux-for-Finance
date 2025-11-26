@@ -10,7 +10,7 @@ st.set_page_config(page_title="Quant Dashboard", layout="wide")
 # ---------------------------------------------------------
 # IMPORT DES MODULES
 # ---------------------------------------------------------
-from modules.finnhub_api import get_live_price, get_history
+from modules.data_loader import get_live_price, get_history
 from modules.strategy_single import (
     strategy_buy_and_hold,
     strategy_sma,
