@@ -2,28 +2,25 @@
 
 quant--dashboard/
 │
-├── app.py                         # Point d'entrée Streamlit
+├── app.py                    # le point d’entrée Streamlit, très léger
 │
 ├── modules/
-│   ├── finnhub_api.py             # API Finnhub
-│   ├── portfolio.py               # Calculs quantitatifs du portefeuille
-│   ├── indicators.py              # Indicateurs (RSI, MACD, ATR…)
-│   ├── utils.py                   # Fonctions utilitaires (dates, cache…)
+│   ├── data_loader.py        # récupération API / web scraping, rafraîchissement
+│   ├── strategy_single.py    # stratégies du Quant A
+│   ├── portfolio_tools.py    # outils du Quant B
+│   ├── metrics.py            # Sharpe, max drawdown, volatility, etc.
+│   ├── plots.py              # fonctions plotly centralisées
+│   └── utils.py              # fonctions génériques
 │
-├── data/
-│   └── assets.json                # Liste des tickers suivis
+├── cron/
+│   ├── daily_report.py       # script lancé à 20h pour rapport quant A/B
+│   └── crontab.txt           # config cron documentée
 │
-├── pages/
-│   ├── 1_Accueil.py
-│   ├── 2_Single_Asset.py
-│   ├── 3_Portfolio.py
-│   └── 4_Taux_France.py           # OU laisser dans app.py, c’est au choix
-│
-├── Importation_data.py            # Scraping Boursorama → peut aller dans modules/
+├── .streamlit/
+│   ├── secrets.toml
+│   └── config.toml
 │
 ├── requirements.txt
-├── .streamlit/
-│   ├── secrets.toml               # Clé API (cloud)
-│   └── config.toml                # Customisation interface Streamlit
-│
-└── README.md
+├── README.md
+└── LICENSE (optionnel)
+
