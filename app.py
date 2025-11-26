@@ -1,77 +1,102 @@
 import streamlit as st
-import Importation_data
-import plotly.express as px
 import pandas as pd
+import plotly.express as px
+
+# ---------------------------------------------------------
+# CONFIG STREAMLIT — DOIT ÊTRE EN PREMIER
+# ---------------------------------------------------------
+st.set_page_config(page_title="Quant Dashboard", layout="wide")
+
+# ---------------------------------------------------------
+# IMPORT DES MODULES
+# ---------------------------------------------------------
 from modules.finnhub_api import get_live_price, get_history
-
-
-# ---------------------------------------------------------
-# FIX STREAMLIT — set_page_config doit être en premier !
-# ---------------------------------------------------------
-st.set_page_config(
-    page_title="Quant Dashboard",
-    layout="wide"
+from modules.strategy_single import (
+    strategy_buy_and_hold,
+    strategy_sma,
+    compute_metrics
 )
+from modules.plots import plot_price_with_indicators, plot_equity
 
 # ---------------------------------------------------------
-# Chargement simple et sécurisé de la clé API Finnhub
+# CHARGEMENT DE LA CLÉ API FINNHUB (SECRETS)
 # ---------------------------------------------------------
 try:
     API_KEY = st.secrets["FINNHUB_API_KEY"]
 
 except KeyError:
-    st.error("""
-    ❌ Clé API Finnhub manquante.
+    st.error(
+        """
+        ❌ Clé API Finnhub manquante.
 
-    ➜ Va dans Streamlit Cloud :  
-      **Settings → Secrets**
+        ➜ Va dans *Streamlit Cloud* → *Settings* → *Secrets*  
+        et ajoute par exemple :
 
-    Et ajoute :
-
-    ```
-    FINNHUB_API_KEY = "ta_clé_api"
-    ```
-    """)
+        FINNHUB_API_KEY = "ta_clé_api_finnhub"
+        """
+    )
     API_KEY = None
 
 except Exception as e:
-    st.error(f"Erreur inattendue lors du chargement de la clé API : {e}")
+    st.error(f"Erreur inattendue lors du chargement de la clé API Finnhub : {e}")
     API_KEY = None
 
-
 # ---------------------------------------------------------
-# Sidebar navigation
+# SIDEBAR — NAVIGATION
 # ---------------------------------------------------------
+st.sidebar.title("📊 Quant Dashboard")
 page = st.sidebar.radio(
-    "📌 Navigation",
-    ["🏠 Accueil", "📈 Single Asset", "📊 Portfolio", "🇫🇷 Taux France"]
+    "Navigation",
+    ["🏠 Accueil", "📈 Single Asset", "📊 Portfolio (bientôt)"]
 )
 
-
-# ------------------------------
-# PAGE 1 — Accueil
-# ------------------------------
+# =========================================================
+# PAGE 1 — ACCUEIL
+# =========================================================
 if page == "🏠 Accueil":
+    st.title("🏠 Quant Dashboard — Projet Python & Finance")
 
-    st.title("📊 Quant Dashboard")
-    st.markdown("### Bienvenue sur ta plateforme d’analyse financière.")
-    st.markdown("Utilise le menu à gauche pour naviguer entre les modules.")
+    st.markdown(
+        """
+        Ce projet a pour objectif de construire une **plateforme de backtest quantitatif**
+        à partir de **données de marché récupérées via API (Finnhub)**.
 
+        ### 🎯 Partie A — Single Asset
+        - Récupération des données historiques d’un actif (ex : AAPL)
+        - Implémentation de stratégies simples :
+            - Buy & Hold
+            - SMA (moyennes mobiles courte / longue)
+        - Backtest de la stratégie sur l’historique
+        - Visualisation :
+            - Prix + indicateurs techniques
+            - Courbe de valeur du portefeuille
+        - Indicateurs de performance :
+            - Sharpe Ratio
+            - Volatilité annualisée
+            - Max Drawdown
 
-# ------------------------------
-# PAGE 2 — Single Asset
-# ------------------------------
+        ### 📌 Partie B — Portfolio (à venir)
+        - Extension à un portefeuille multi-actifs
+        - Corrélations, diversification, allocation
+
+        ➜ Utilise le menu à gauche pour lancer l’analyse Single Asset.
+        """
+    )
+
+# =========================================================
+# PAGE 2 — SINGLE ASSET (QUANT A)
+# =========================================================
 elif page == "📈 Single Asset":
 
     st.title("📈 Analyse d’un Actif Unique — Quant A")
 
     if API_KEY is None:
-        st.warning("⚠️ Configure ta clé API dans `.streamlit/secrets.toml`.")
+        st.warning("⚠️ La clé API Finnhub n’est pas configurée. Va dans les *Secrets* Streamlit.")
         st.stop()
 
-    # ---------------------------------------------------------
-    # Sidebar de paramètres
-    # ---------------------------------------------------------
+    # ------------------------------
+    # Sidebar paramètres
+    # ------------------------------
     st.sidebar.subheader("⚙️ Paramètres de l’analyse")
 
     symbol = st.sidebar.text_input("Ticker :", "AAPL")
@@ -82,156 +107,105 @@ elif page == "📈 Single Asset":
     )
 
     if strategy_choice == "SMA Momentum":
-        short = st.sidebar.number_input("SMA courte :", 5, 100, 20)
-        long = st.sidebar.number_input("SMA longue :", 20, 300, 50)
+        short = st.sidebar.number_input("SMA courte (jours) :", 5, 100, 20)
+        long = st.sidebar.number_input("SMA longue (jours) :", 20, 300, 50)
 
-    lookback = st.sidebar.slider("Nombre de jours d'historique", 100, 1500, 365)
+    lookback = st.sidebar.slider(
+        "Nombre de points historiques (bougies journalières)",
+        min_value=100,
+        max_value=1500,
+        value=365,
+        step=10
+    )
 
     if st.sidebar.button("🚀 Lancer l’analyse"):
-        st.session_state["run_analysis"] = True
+        st.session_state["run_single"] = True
 
-    if "run_analysis" not in st.session_state:
-        st.info("Configure les paramètres dans la sidebar 😊")
+    if "run_single" not in st.session_state:
+        st.info("Configure les paramètres dans la colonne de gauche, puis clique sur **🚀 Lancer l’analyse**.")
         st.stop()
 
-    # ---------------------------------------------------------
+    # ------------------------------
     # 1. Chargement des données
-    # ---------------------------------------------------------
-    st.subheader("📡 Chargement des données")
+    # ------------------------------
+    st.subheader("📡 Données historiques")
 
-    df = get_history(symbol, API_KEY, lookback_days=lookback)
+    try:
+        # On utilise le module Finnhub existant : on mappe `lookback` sur `count`
+        df = get_history(symbol, API_KEY, resolution="D", count=lookback)
+    except Exception as e:
+        st.error(f"Erreur lors de la récupération des données Finnhub : {e}")
+        st.stop()
 
-    if df is None:
-        st.error("❌ Impossible de récupérer les données Finnhub.")
+    if df is None or df.empty:
+        st.error("❌ Aucune donnée reçue de Finnhub pour ce ticker / ces paramètres.")
         st.stop()
 
     st.success(f"Données chargées pour {symbol}")
     st.dataframe(df.tail(), use_container_width=True)
 
-    # ---------------------------------------------------------
+    # ------------------------------
     # 2. Application des stratégies
-    # ---------------------------------------------------------
-    from modules.strategy_single import (
-        strategy_buy_and_hold,
-        strategy_sma,
-        compute_metrics
-    )
-    from modules.plots import plot_price_with_indicators, plot_equity
+    # ------------------------------
+    st.subheader("🧠 Stratégie appliquée")
 
     df_bh = strategy_buy_and_hold(df)
 
     if strategy_choice == "Buy & Hold":
         df_strat = df_bh.copy()
+        st.write("Stratégie utilisée : **Buy & Hold** (pleinement investi tout du long).")
 
     else:
         df_strat = strategy_sma(df, short=short, long=long)
+        st.write(
+            f"Stratégie utilisée : **SMA Momentum** avec SMA courte = {short} jours, "
+            f"SMA longue = {long} jours."
+        )
 
-    # ---------------------------------------------------------
-    # 3. Graphique principal (prix + indicateurs)
-    # ---------------------------------------------------------
+    # ------------------------------
+    # 3. Graphique prix + indicateurs
+    # ------------------------------
     st.subheader("📉 Prix & Indicateurs")
 
     fig_price = plot_price_with_indicators(df_strat)
     st.plotly_chart(fig_price, use_container_width=True)
 
-    # ---------------------------------------------------------
-    # 4. Equity curves
-    # ---------------------------------------------------------
+    # ------------------------------
+    # 4. Courbes de valeur (equity curves)
+    # ------------------------------
     st.subheader("📈 Performance — Stratégie vs Buy & Hold")
 
     fig_equity = plot_equity(df_bh, df_strat)
     st.plotly_chart(fig_equity, use_container_width=True)
 
-    # ---------------------------------------------------------
-    # 5. Metrics
-    # ---------------------------------------------------------
+    # ------------------------------
+    # 5. Indicateurs de performance
+    # ------------------------------
     st.subheader("📊 Indicateurs quantitatifs")
 
     metrics = compute_metrics(df_strat)
 
     col1, col2, col3 = st.columns(3)
     col1.metric("Sharpe Ratio", metrics["Sharpe Ratio"])
-    col2.metric("Volatilité (ann.)", metrics["Volatility (ann.)"])
+    col2.metric("Volatilité (ann.)", f"{metrics['Volatility (ann.)']:.2%}")
     col3.metric("Max Drawdown", f"{metrics['Max Drawdown']*100:.2f}%")
 
+# =========================================================
+# PAGE 3 — PORTFOLIO (PLACEHOLDER)
+# =========================================================
+elif page == "📊 Portfolio (bientôt)":
+    st.title("📊 Portfolio — Multi-Actifs (à venir)")
 
+    st.markdown(
+        """
+        Cette section sera dédiée à la **Partie B** du projet :
 
-    st.title("📈 Analyse d'un Actif Unique")
+        - Gestion d’un portefeuille multi-actifs
+        - Récupération des prix pour plusieurs tickers
+        - Construction de portefeuilles
+        - Indicateurs de performance globaux
+        - Corrélations, diversification, matrices de covariance
 
-    if API_KEY is None:
-        st.warning("⚠️ Configure ta clé API dans `.streamlit/secrets.toml`.")
-        st.stop()
-
-    with st.container():
-        st.subheader("🔎 Sélection de l'actif")
-        symbol = st.text_input("Ticker :", "AAPL")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        if st.button("📡 Prix live"):
-            price = get_live_price(symbol, API_KEY)
-            if price:
-                st.success(f"💵 Prix actuel de **{symbol}** : `{price} USD`")
-            else:
-                st.error("Erreur de récupération du prix via Finnhub.")
-
-    with col2:
-        if st.button("📈 Charger l'historique"):
-            df_hist = get_history(symbol, API_KEY, resolution="D", count=200)
-
-            if df_hist is not None:
-                st.dataframe(df_hist, use_container_width=True)
-
-                fig = px.line(
-                    df_hist,
-                    x="Date",
-                    y="Close",
-                    title=f"Historique des prix — {symbol}"
-                )
-                st.plotly_chart(fig, use_container_width=True)
-
-            else:
-                st.error("Impossible de récupérer les données historiques.")
-
-
-# ------------------------------
-# PAGE 3 — Portfolio
-# ------------------------------
-elif page == "📊 Portfolio":
-
-    st.title("📊 Analyse Portefeuille Multi-Actifs")
-    st.info("🚧 En cours de développement — bientôt disponible !")
-
-
-# ------------------------------
-# PAGE 4 — 🇫🇷 Taux France (live)
-# ------------------------------
-elif page == "🇫🇷 Taux France":
-
-    st.title("🇫🇷 Courbe des taux — France (Live Boursorama)")
-
-    if st.button("🔄 Rafraîchir maintenant"):
-        st.cache_data.clear()
-        st.success("Données mises à jour !")
-
-    @st.cache_data(ttl=300)
-    def load_france_yields():
-        return Importation_data.get_france_yields()
-
-    try:
-        df = load_france_yields()
-
-        st.subheader("📋 Tableau des taux souverains")
-        st.dataframe(df, use_container_width=True)
-
-        st.subheader("📈 Courbe des taux (graphique)")
-        fig = px.line(
-            df.T.iloc[1:],
-            title="Courbe des taux — France",
-            labels={"index": "Maturité", "value": "Taux (%)"},
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-    except Exception as e:
-        st.error(f"Erreur lors du chargement des données : {e}")
+        👉 Pour l’instant, concentre-toi sur la partie **Single Asset (Quant A)**.
+        """
+    )
