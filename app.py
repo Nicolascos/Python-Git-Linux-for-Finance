@@ -12,8 +12,6 @@ st.set_page_config(page_title="Quant Dashboard", layout="wide")
 # ---------------------------------------------------------
 try:
     API_KEY = st.secrets["FINNHUB_API_KEY"]
-    # DEBUG : afficher la clé lue (ou juste ses premiers caractères si tu veux)
-    st.write("DEBUG API KEY =", API_KEY)
 
 except KeyError:
     st.error(
