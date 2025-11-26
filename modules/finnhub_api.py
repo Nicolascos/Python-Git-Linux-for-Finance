@@ -1,3 +1,4 @@
+'''
 import finnhub
 import pandas as pd
 
@@ -53,3 +54,4 @@ def get_history(symbol: str, api_key: str, resolution="D", count=100):
         print(f"Erreur API pour l'historique de {symbol} :", e)
         return None
 
+'''
