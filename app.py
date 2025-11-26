@@ -63,6 +63,99 @@ if page == "🏠 Accueil":
 # ------------------------------
 elif page == "📈 Single Asset":
 
+    st.title("📈 Analyse d’un Actif Unique — Quant A")
+
+    if API_KEY is None:
+        st.warning("⚠️ Configure ta clé API dans `.streamlit/secrets.toml`.")
+        st.stop()
+
+    # ---------------------------------------------------------
+    # Sidebar de paramètres
+    # ---------------------------------------------------------
+    st.sidebar.subheader("⚙️ Paramètres de l’analyse")
+
+    symbol = st.sidebar.text_input("Ticker :", "AAPL")
+
+    strategy_choice = st.sidebar.selectbox(
+        "Stratégie :",
+        ["Buy & Hold", "SMA Momentum"]
+    )
+
+    if strategy_choice == "SMA Momentum":
+        short = st.sidebar.number_input("SMA courte :", 5, 100, 20)
+        long = st.sidebar.number_input("SMA longue :", 20, 300, 50)
+
+    lookback = st.sidebar.slider("Nombre de jours d'historique", 100, 1500, 365)
+
+    if st.sidebar.button("🚀 Lancer l’analyse"):
+        st.session_state["run_analysis"] = True
+
+    if "run_analysis" not in st.session_state:
+        st.info("Configure les paramètres dans la sidebar 😊")
+        st.stop()
+
+    # ---------------------------------------------------------
+    # 1. Chargement des données
+    # ---------------------------------------------------------
+    st.subheader("📡 Chargement des données")
+
+    df = get_history(symbol, API_KEY, lookback_days=lookback)
+
+    if df is None:
+        st.error("❌ Impossible de récupérer les données Finnhub.")
+        st.stop()
+
+    st.success(f"Données chargées pour {symbol}")
+    st.dataframe(df.tail(), use_container_width=True)
+
+    # ---------------------------------------------------------
+    # 2. Application des stratégies
+    # ---------------------------------------------------------
+    from modules.strategy_single import (
+        strategy_buy_and_hold,
+        strategy_sma,
+        compute_metrics
+    )
+    from modules.plots import plot_price_with_indicators, plot_equity
+
+    df_bh = strategy_buy_and_hold(df)
+
+    if strategy_choice == "Buy & Hold":
+        df_strat = df_bh.copy()
+
+    else:
+        df_strat = strategy_sma(df, short=short, long=long)
+
+    # ---------------------------------------------------------
+    # 3. Graphique principal (prix + indicateurs)
+    # ---------------------------------------------------------
+    st.subheader("📉 Prix & Indicateurs")
+
+    fig_price = plot_price_with_indicators(df_strat)
+    st.plotly_chart(fig_price, use_container_width=True)
+
+    # ---------------------------------------------------------
+    # 4. Equity curves
+    # ---------------------------------------------------------
+    st.subheader("📈 Performance — Stratégie vs Buy & Hold")
+
+    fig_equity = plot_equity(df_bh, df_strat)
+    st.plotly_chart(fig_equity, use_container_width=True)
+
+    # ---------------------------------------------------------
+    # 5. Metrics
+    # ---------------------------------------------------------
+    st.subheader("📊 Indicateurs quantitatifs")
+
+    metrics = compute_metrics(df_strat)
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Sharpe Ratio", metrics["Sharpe Ratio"])
+    col2.metric("Volatilité (ann.)", metrics["Volatility (ann.)"])
+    col3.metric("Max Drawdown", f"{metrics['Max Drawdown']*100:.2f}%")
+
+
+
     st.title("📈 Analyse d'un Actif Unique")
 
     if API_KEY is None:
