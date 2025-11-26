@@ -131,8 +131,8 @@ elif page == "📈 Single Asset":
     st.subheader("📡 Données historiques")
 
     try:
-        # On utilise le module Finnhub existant : on mappe `lookback` sur `count`
-        df = get_history(symbol, API_KEY, resolution="D", count=lookback)
+        # On utilise le module Finnhub existant : on mappe `lookback` sur `lookback_days`
+        df = get_history(symbol, API_KEY, resolution="D", lookback_days=lookback)
     except Exception as e:
         st.error(f"Erreur lors de la récupération des données Finnhub : {e}")
         st.stop()
