@@ -132,7 +132,8 @@ elif page == "📈 Single Asset":
 
     try:
         # On utilise le module Finnhub existant : on mappe `lookback` sur `lookback_days`
-        df = get_history(symbol, API_KEY, resolution="D", lookback_days=lookback)
+        dft = get_history(symbol, API_KEY, resolution="D", lookback_days=lookback)
+        st.write("DEBUG JSON FINNHUB:", dft)
     except Exception as e:
         st.error(f"Erreur lors de la récupération des données Finnhub : {e}")
         st.stop()
