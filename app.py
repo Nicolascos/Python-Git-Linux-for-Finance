@@ -2,30 +2,18 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-st.write("DEBUG API KEY =", FINNHUB_API_KEY)
-
-
 # ---------------------------------------------------------
 # CONFIG STREAMLIT — DOIT ÊTRE EN PREMIER
 # ---------------------------------------------------------
 st.set_page_config(page_title="Quant Dashboard", layout="wide")
 
 # ---------------------------------------------------------
-# IMPORT DES MODULES
-# ---------------------------------------------------------
-from modules.data_loader import get_live_price, get_history
-from modules.strategy_single import (
-    strategy_buy_and_hold,
-    strategy_sma,
-    compute_metrics
-)
-from modules.plots import plot_price_with_indicators, plot_equity
-
-# ---------------------------------------------------------
 # CHARGEMENT DE LA CLÉ API FINNHUB (SECRETS)
 # ---------------------------------------------------------
 try:
     API_KEY = st.secrets["FINNHUB_API_KEY"]
+    # DEBUG : afficher la clé lue (ou juste ses premiers caractères si tu veux)
+    st.write("DEBUG API KEY =", API_KEY)
 
 except KeyError:
     st.error(
@@ -43,6 +31,17 @@ except KeyError:
 except Exception as e:
     st.error(f"Erreur inattendue lors du chargement de la clé API Finnhub : {e}")
     API_KEY = None
+
+# ---------------------------------------------------------
+# IMPORT DES MODULES
+# ---------------------------------------------------------
+from modules.data_loader import get_live_price, get_history
+from modules.strategy_single import (
+    strategy_buy_and_hold,
+    strategy_sma,
+    compute_metrics
+)
+from modules.plots import plot_price_with_indicators, plot_equity
 
 # ---------------------------------------------------------
 # SIDEBAR — NAVIGATION
