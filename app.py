@@ -2,6 +2,9 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
+st.write("DEBUG API KEY =", FINNHUB_API_KEY)
+
+
 # ---------------------------------------------------------
 # CONFIG STREAMLIT — DOIT ÊTRE EN PREMIER
 # ---------------------------------------------------------
