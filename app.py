@@ -14,6 +14,10 @@ from modules.data_loader import get_live_price, get_history
 from modules.strategy_single import (
     strategy_buy_and_hold,
     strategy_sma,
+    strategy_rsi,
+    strategy_macd,
+    strategy_bollinger,
+    strategy_golden_cross,
     compute_metrics
 )
 from modules.plots import plot_price_with_indicators, plot_equity
@@ -43,6 +47,10 @@ if page == "🏠 Accueil":
         - Stratégies :
             - Buy & Hold
             - SMA (moyennes mobiles)
+            - RSI
+            - MACD
+            - Bandes de Bollinger
+            - Golden Cross
         - Visualisation :
             - Prix + indicateurs techniques
             - Equity curve
@@ -50,13 +58,8 @@ if page == "🏠 Accueil":
             - Sharpe Ratio
             - Volatilité annualisée
             - Max Drawdown
-
-        ### 📌 Partie B — Portfolio (à venir)
-
-        ➜ Utilise le menu à gauche pour lancer l’analyse Single Asset.
         """
     )
-
 
 # =========================================================
 # PAGE 2 — SINGLE ASSET (QUANT A)
@@ -70,13 +73,21 @@ elif page == "📈 Single Asset":
     # ------------------------------
     st.sidebar.subheader("⚙️ Paramètres de l’analyse")
 
-    symbol = st.sidebar.text_input("Ticker :", "AAPL")   # ex : AAPL / BTC-USD / ^GSPC
+    symbol = st.sidebar.text_input("Ticker :", "AAPL")  # ex : AAPL / BTC-USD / ^GSPC
 
     strategy_choice = st.sidebar.selectbox(
         "Stratégie :",
-        ["Buy & Hold", "SMA Momentum"]
+        [
+            "Buy & Hold",
+            "SMA Momentum",
+            "RSI",
+            "MACD",
+            "Bollinger",
+            "Golden Cross"
+        ]
     )
 
+    # Paramètres spécifiques SMA
     if strategy_choice == "SMA Momentum":
         short = st.sidebar.number_input("SMA courte (jours) :", 5, 100, 20)
         long = st.sidebar.number_input("SMA longue (jours) :", 20, 300, 50)
@@ -93,7 +104,7 @@ elif page == "📈 Single Asset":
         st.session_state["run_single"] = True
 
     if "run_single" not in st.session_state:
-        st.info("Configure les paramètres dans la colonne de gauche, puis clique sur **🚀 Lancer l’analyse**.")
+        st.info("Configure les paramètres puis clique sur **🚀 Lancer l’analyse**.")
         st.stop()
 
     # ------------------------------
@@ -115,18 +126,33 @@ elif page == "📈 Single Asset":
     # ------------------------------
     st.subheader("🧠 Stratégie appliquée")
 
+    # Buy & Hold toujours calculé
     df_bh = strategy_buy_and_hold(df)
 
+    # Sélection stratégie
     if strategy_choice == "Buy & Hold":
         df_strat = df_bh.copy()
         st.write("Stratégie utilisée : **Buy & Hold**.")
 
-    else:
+    elif strategy_choice == "SMA Momentum":
         df_strat = strategy_sma(df, short=short, long=long)
-        st.write(
-            f"Stratégie utilisée : **SMA Momentum** avec SMA courte = {short} jours, "
-            f"SMA longue = {long} jours."
-        )
+        st.write(f"SMA Momentum — courte = {short}, longue = {long}")
+
+    elif strategy_choice == "RSI":
+        df_strat = strategy_rsi(df)
+        st.write("Stratégie utilisée : **RSI** (surachat/survente).")
+
+    elif strategy_choice == "MACD":
+        df_strat = strategy_macd(df)
+        st.write("Stratégie utilisée : **MACD**.")
+
+    elif strategy_choice == "Bollinger":
+        df_strat = strategy_bollinger(df)
+        st.write("Stratégie utilisée : **Bandes de Bollinger**.")
+
+    elif strategy_choice == "Golden Cross":
+        df_strat = strategy_golden_cross(df)
+        st.write("Stratégie utilisée : **Golden Cross / Death Cross**.")
 
     # ------------------------------
     # 3. Graphique prix + indicateurs
@@ -156,7 +182,6 @@ elif page == "📈 Single Asset":
     col2.metric("Volatilité (ann.)", f"{metrics['Volatility (ann.)']:.2%}")
     col3.metric("Max Drawdown", f"{metrics['Max Drawdown']*100:.2f}%")
 
-
 # =========================================================
 # PAGE 3 — PORTFOLIO (PLACEHOLDER)
 # =========================================================
@@ -167,11 +192,11 @@ elif page == "📊 Portfolio (bientôt)":
         """
         Cette section sera dédiée à la **Partie B** du projet :
 
-        - Gestion d’un portefeuille multi-actifs
-        - Récupération de plusieurs tickers
-        - Construction d’allocations
-        - Corrélations, matrices de covariance
-        - Equity curve du portefeuille
+        - Gestion d’un portefeuille multi-actifs  
+        - Récupération de plusieurs tickers  
+        - Construction d’allocations  
+        - Corrélations, matrices de covariance  
+        - Equity curve du portefeuille  
 
         👉 À venir prochainement.
         """
