@@ -8,29 +8,6 @@ import plotly.express as px
 st.set_page_config(page_title="Quant Dashboard", layout="wide")
 
 # ---------------------------------------------------------
-# CHARGEMENT DE LA CLÉ API FINNHUB (SECRETS)
-# ---------------------------------------------------------
-try:
-    API_KEY = st.secrets["FINNHUB_API_KEY"]
-
-except KeyError:
-    st.error(
-        """
-        ❌ Clé API Finnhub manquante.
-
-        ➜ Va dans *Streamlit Cloud* → *Settings* → *Secrets*  
-        et ajoute par exemple :
-
-        FINNHUB_API_KEY = "ta_clé_api_finnhub"
-        """
-    )
-    API_KEY = None
-
-except Exception as e:
-    st.error(f"Erreur inattendue lors du chargement de la clé API Finnhub : {e}")
-    API_KEY = None
-
-# ---------------------------------------------------------
 # IMPORT DES MODULES
 # ---------------------------------------------------------
 from modules.data_loader import get_live_price, get_history
@@ -59,29 +36,27 @@ if page == "🏠 Accueil":
     st.markdown(
         """
         Ce projet a pour objectif de construire une **plateforme de backtest quantitatif**
-        à partir de **données de marché récupérées via API (Finnhub)**.
+        basée sur des **données de marché (Yahoo Finance via yfinance)**.
 
         ### 🎯 Partie A — Single Asset
-        - Récupération des données historiques d’un actif (ex : AAPL)
-        - Implémentation de stratégies simples :
+        - Récupération des données historiques (actions, crypto, indices…)
+        - Stratégies :
             - Buy & Hold
-            - SMA (moyennes mobiles courte / longue)
-        - Backtest de la stratégie sur l’historique
+            - SMA (moyennes mobiles)
         - Visualisation :
             - Prix + indicateurs techniques
-            - Courbe de valeur du portefeuille
-        - Indicateurs de performance :
+            - Equity curve
+        - Indicateurs quantitatifs :
             - Sharpe Ratio
             - Volatilité annualisée
             - Max Drawdown
 
         ### 📌 Partie B — Portfolio (à venir)
-        - Extension à un portefeuille multi-actifs
-        - Corrélations, diversification, allocation
 
         ➜ Utilise le menu à gauche pour lancer l’analyse Single Asset.
         """
     )
+
 
 # =========================================================
 # PAGE 2 — SINGLE ASSET (QUANT A)
@@ -90,16 +65,12 @@ elif page == "📈 Single Asset":
 
     st.title("📈 Analyse d’un Actif Unique — Quant A")
 
-    if API_KEY is None:
-        st.warning("⚠️ La clé API Finnhub n’est pas configurée. Va dans les *Secrets* Streamlit.")
-        st.stop()
-
     # ------------------------------
     # Sidebar paramètres
     # ------------------------------
     st.sidebar.subheader("⚙️ Paramètres de l’analyse")
 
-    symbol = st.sidebar.text_input("Ticker :", "AAPL")
+    symbol = st.sidebar.text_input("Ticker :", "AAPL")   # ex : AAPL / BTC-USD / ^GSPC
 
     strategy_choice = st.sidebar.selectbox(
         "Stratégie :",
@@ -111,11 +82,11 @@ elif page == "📈 Single Asset":
         long = st.sidebar.number_input("SMA longue (jours) :", 20, 300, 50)
 
     lookback = st.sidebar.slider(
-        "Nombre de points historiques (bougies journalières)",
+        "Nombre de jours d’historique",
         min_value=100,
-        max_value=1500,
+        max_value=3000,
         value=365,
-        step=10
+        step=50
     )
 
     if st.sidebar.button("🚀 Lancer l’analyse"):
@@ -130,16 +101,10 @@ elif page == "📈 Single Asset":
     # ------------------------------
     st.subheader("📡 Données historiques")
 
-    try:
-        # On utilise le module Finnhub existant : on mappe `lookback` sur `lookback_days`
-        dft = get_history(symbol, API_KEY, resolution="D", lookback_days=lookback)
-        st.write("DEBUG JSON FINNHUB:", dft)
-    except Exception as e:
-        st.error(f"Erreur lors de la récupération des données Finnhub : {e}")
-        st.stop()
+    df = get_history(symbol, lookback_days=lookback)
 
     if df is None or df.empty:
-        st.error("❌ Aucune donnée reçue de Finnhub pour ce ticker / ces paramètres.")
+        st.error("❌ Impossible de récupérer des données pour ce ticker.")
         st.stop()
 
     st.success(f"Données chargées pour {symbol}")
@@ -154,7 +119,7 @@ elif page == "📈 Single Asset":
 
     if strategy_choice == "Buy & Hold":
         df_strat = df_bh.copy()
-        st.write("Stratégie utilisée : **Buy & Hold** (pleinement investi tout du long).")
+        st.write("Stratégie utilisée : **Buy & Hold**.")
 
     else:
         df_strat = strategy_sma(df, short=short, long=long)
@@ -191,6 +156,7 @@ elif page == "📈 Single Asset":
     col2.metric("Volatilité (ann.)", f"{metrics['Volatility (ann.)']:.2%}")
     col3.metric("Max Drawdown", f"{metrics['Max Drawdown']*100:.2f}%")
 
+
 # =========================================================
 # PAGE 3 — PORTFOLIO (PLACEHOLDER)
 # =========================================================
@@ -202,11 +168,11 @@ elif page == "📊 Portfolio (bientôt)":
         Cette section sera dédiée à la **Partie B** du projet :
 
         - Gestion d’un portefeuille multi-actifs
-        - Récupération des prix pour plusieurs tickers
-        - Construction de portefeuilles
-        - Indicateurs de performance globaux
-        - Corrélations, diversification, matrices de covariance
+        - Récupération de plusieurs tickers
+        - Construction d’allocations
+        - Corrélations, matrices de covariance
+        - Equity curve du portefeuille
 
-        👉 Pour l’instant, concentre-toi sur la partie **Single Asset (Quant A)**.
+        👉 À venir prochainement.
         """
     )
