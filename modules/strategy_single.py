@@ -39,8 +39,9 @@ def strategy_sma(df: pd.DataFrame, short=20, long=50):
     df["SMA_long"] = df["Close"].rolling(long).mean()
 
     df["Signal"] = 0
-    df.loc[df["SMA_short"] > df["SMA_long"], "Signal"] = 1
-    df.loc[df["SMA_short"] < df["SMA_long"], "Signal"] = -1
+    # Correction : Utiliser .values pour garantir l'alignement
+    df.loc[df["SMA_short"].values > df["SMA_long"].values, "Signal"] = 1
+    df.loc[df["SMA_short"].values < df["SMA_long"].values, "Signal"] = -1
 
     # Position = signal d'aujourd’hui (sans look-ahead bias)
     df["Position"] = df["Signal"].shift(1).fillna(0)
@@ -73,8 +74,9 @@ def strategy_rsi(df: pd.DataFrame, window=14):
     df = compute_rsi(df, window)
 
     df["Signal"] = 0
-    df.loc[df["RSI"] < 30, "Signal"] = 1      # Achat
-    df.loc[df["RSI"] > 70, "Signal"] = -1     # Vente
+    # Correction : Utiliser .values pour garantir l'alignement
+    df.loc[df["RSI"].values < 30, "Signal"] = 1      # Achat
+    df.loc[df["RSI"].values > 70, "Signal"] = -1     # Vente
 
     df["Position"] = df["Signal"].shift(1).fillna(0)
     df["Returns"] = df["Close"].pct_change().fillna(0)
@@ -97,9 +99,11 @@ def strategy_macd(df: pd.DataFrame):
     df["Signal"] = df["MACD"].ewm(span=9, adjust=False).mean()
 
     df["Position"] = 0
-    df.loc[df["MACD"] > df["Signal"], "Position"] = 1
-    df.loc[df["MACD"] < df["Signal"], "Position"] = -1
+    # Correction : Utiliser .values pour garantir l'alignement
+    df.loc[df["MACD"].values > df["Signal"].values, "Position"] = 1
+    df.loc[df["MACD"].values < df["Signal"].values, "Position"] = -1
 
+    # Le shift est appliqué à la Position, pas au Signal
     df["Position"] = df["Position"].shift(1).fillna(0)
     df["Returns"] = df["Close"].pct_change().fillna(0)
 
@@ -121,8 +125,9 @@ def strategy_bollinger(df: pd.DataFrame, window=20, num_std=2):
     df["Lower"] = df["MA"] - num_std * df["STD"]
 
     df["Signal"] = 0
-    df.loc[df["Close"] < df["Lower"], "Signal"] = 1   # Achat
-    df.loc[df["Close"] > df["Upper"], "Signal"] = -1  # Vente
+    # Correction (Cause de l'erreur) : Utiliser .values pour garantir l'alignement
+    df.loc[df["Close"].values < df["Lower"].values, "Signal"] = 1   # Achat
+    df.loc[df["Close"].values > df["Upper"].values, "Signal"] = -1  # Vente
 
     df["Position"] = df["Signal"].shift(1).fillna(0)
 
@@ -133,7 +138,7 @@ def strategy_bollinger(df: pd.DataFrame, window=20, num_std=2):
 
 
 # -------------------------------------------------------------
-# STRATÉGIE 5 :  Golden Cross / Death Cross
+# STRATÉGIE 6 :  Golden Cross / Death Cross
 # -------------------------------------------------------------
 def strategy_golden_cross(df: pd.DataFrame):
     df = df.copy()
@@ -142,8 +147,9 @@ def strategy_golden_cross(df: pd.DataFrame):
     df["SMA200"] = df["Close"].rolling(200).mean()
 
     df["Signal"] = 0
-    df.loc[df["SMA50"] > df["SMA200"], "Signal"] = 1
-    df.loc[df["SMA50"] < df["SMA200"], "Signal"] = -1
+    # Correction : Utiliser .values pour garantir l'alignement
+    df.loc[df["SMA50"].values > df["SMA200"].values, "Signal"] = 1
+    df.loc[df["SMA50"].values < df["SMA200"].values, "Signal"] = -1
 
     df["Position"] = df["Signal"].shift(1).fillna(0)
     df["Returns"] = df["Close"].pct_change().fillna(0)

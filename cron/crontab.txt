@@ -1,0 +1,16 @@
+# crontab.txt
+# Fichier de documentation de la configuration cron pour le rapport quotidien (Feature 6)
+
+# Configuration : Exécution tous les jours à 20h00 (heure locale de la VM).
+# La commande 'crontab -e' doit être utilisée sur la VM pour ajouter cette ligne.
+
+# Syntaxe cron : minute(0-59) hour(0-23) day_of_month(1-31) month(1-12) day_of_week(0-7) command
+
+# 0 20 * * * /usr/bin/python3 /chemin/absolut/vers/votre/projet/daily_report.py
+
+# IMPORTANT : Remplacer "/chemin/absolut/vers/votre/projet/" par le chemin réel
+# sur la machine Linux (e.g., /home/user/quant-finance/daily_report.py)
+# Utiliser la commande 'which python3' pour vérifier l'interpréteur.
+
+# Example final (à adapter) :
+# 0 20 * * * /usr/bin/python3 /home/votre_user/PYTHON-GIT-LINUX-FOR-FINANCE/daily_report.py
