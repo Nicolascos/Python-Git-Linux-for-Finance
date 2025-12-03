@@ -71,7 +71,14 @@ elif page == "📈 Single Asset":
     # ------------------------------
     st.sidebar.subheader("⚙️ Paramètres de l’analyse")
 
-    symbol = st.sidebar.text_input("Ticker :", "AAPL").upper() # Force en majuscules
+    ticker_dict = {
+    "Actions US 🇺🇸": ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA"],
+    "Crypto 💎": ["BTC-USD", "ETH-USD", "SOL-USD"],
+    "Indices 📈": ["^GSPC", "^DJI", "^IXIC"]
+    }
+
+    categorie = st.sidebar.selectbox("Catégorie d’actifs :", list(ticker_dict.keys()))
+    symbol = st.sidebar.selectbox("Ticker :", ticker_dict[categorie])
     
     # Récupération et affichage du prix live (Feature 3)
     live_price = get_live_price(symbol)
