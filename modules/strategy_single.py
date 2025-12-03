@@ -194,9 +194,6 @@ def compute_metrics(df: pd.DataFrame, column="Strategy"):
     }
 
 
-# -------------------------------------------------------------
-# CLASSE AVANCÉE : SingleAssetAnalyzer
-# -------------------------------------------------------------
 class SingleAssetAnalyzer:
     def __init__(self, ticker, start_date, end_date, initial_investment=1000):
         self.ticker = ticker
