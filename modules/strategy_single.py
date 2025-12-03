@@ -384,13 +384,16 @@ class SingleAssetAnalyzer:
             preds = []
             current_lag1 = df['Close'].iloc[-1]
             current_lag2 = df['Close'].iloc[-2]
-            current_ma = df['MA5'].iloc[-1]
+            # Keep track of recent values for rolling MA calculation
+            recent_values = list(df['Close'].tail(5).values)
 
             for _ in range(days_ahead):
+                current_ma = np.mean(recent_values[-5:])
                 pred = model.predict([[current_lag1, current_lag2, current_ma]])[0]
                 preds.append(pred)
                 current_lag2 = current_lag1
                 current_lag1 = pred
+                recent_values.append(pred)
 
             train_preds = model.predict(X)
             std_dev = np.std(y - train_preds)
