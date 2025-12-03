@@ -1,0 +1,55 @@
+[33ma75debc[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m modif app
+[33m23498f4[m suppression affichage nom stratégie inutile
+[33mc954c27[m maj Add SingleAssetAnalyzer class to strategy_single
+[33m0478949[m[33m ([m[1;31morigin/copilot/add-single-asset-analyzer[m[33m)[m Merge branch 'main' into copilot/add-single-asset-analyzer
+[33m1a6091f[m include SingleAssetAnalyzer and statsmodels
+[33m6d2b3fb[m Fix Random Forest prediction to update moving average in loop
+[33m5face1b[m[33m ([m[1;31morigin/copilot/update-single-asset-analyzer[m[33m)[m Merge branch 'main' into copilot/update-single-asset-analyzer
+[33m5f4253d[m Add SingleAssetAnalyzer class and statsmodels dependency
+[33m416b98b[m maj
+[33m1c125f6[m Add SingleAssetAnalyzer class and statsmodels dependency
+[33m573e604[m maj
+[33m474239d[m[33m ([m[1;31morigin/copilot/update-strategy-single-py[m[33m)[m Add SingleAssetAnalyzer class with advanced features and statsmodels dependency
+[33mfcc2441[m Initial plan
+[33m2b5fb12[m Initial plan
+[33m1223422[m[33m ([m[1;31morigin/copilot/update-strategy-single-module[m[33m)[m Initial plan
+[33ma15a6f2[m suppression plot inutile et non fonctionnel
+[33m1ae0966[m Initial plan
+[33m6328f2b[m menu roulant par catégorie pour single asset
+[33mdc5b2de[m Supression lignes inutiles
+[33md52e8d0[m maj + report
+[33m76c2e91[m nouvelles strategies SMA, RSI, MACD, Bollinger, Golden Cross
+[33m1b43955[m Passage a yfinance car finhub gratuit ne possede pas tout
+[33m2ee4fd4[m Test
+[33m65c9a57[m Modif importante api
+[33m196f34d[m Test  modfi app api
+[33m1060502[m Test
+[33m56981c0[m modfi app bug history
+[33m83a650f[m Modif API sur app
+[33m4c187d5[m Modif API Finnhub
+[33m5ec4655[m Modif API
+[33m1479457[m Clean app.py and focus on Quant A single-asset backtest
+[33md0e87a9[m Modif structure + code
+[33me5c86ff[m Structure code
+[33m08772fb[m Structure code
+[33m124ab8c[m gitignore maj
+[33m56288b2[m maj add html5lib
+[33m350ba95[m Added Dev Container Folder
+[33m6699303[m maj requirements
+[33mddf18c4[m maj Importation_data
+[33m988744e[m Fix requirements for Streamlit Cloud
+[33m60a24f7[m maj app.py
+[33m7a01ed9[m maj app.py
+[33m50c230b[m requirements_dev.txt pour collaborateur et requirements.txt pour compatibilite avec Streamlit Cloud
+[33m1c73fdb[m MAJ app.py + config API finnhub + corrections
+[33m1d0ae91[m Add modules folder et finnhub_api.py
+[33m0cb830b[m maj requirements.txt (install finnhub-python)
+[33me69b686[m Merge remote-tracking branch 'origin/main'
+[33m3a72f12[m Document pour activer environement et astuces
+[33m1b46712[m correction importation 1/2
+[33m7eeac03[m Importation des données
+[33me34f792[m Update app.py
+[33m5e882c1[m app sur streamlit
+[33mc655ea1[m Add gitignore file
+[33m52492be[m Add requirements.txt
+[33m3777a45[m Initial commit
