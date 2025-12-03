@@ -194,6 +194,7 @@ def compute_metrics(df: pd.DataFrame, column="Strategy"):
     }
 
 
+
 class SingleAssetAnalyzer:
     def __init__(self, ticker, start_date, end_date, initial_investment=1000):
         self.ticker = ticker
@@ -233,7 +234,7 @@ class SingleAssetAnalyzer:
         rf = 0.03
         mean_ret = strategy_returns.mean()
         std_ret = strategy_returns.std()
-        
+
         if std_ret == 0:
             sharpe = 0
         else:
@@ -261,7 +262,7 @@ class SingleAssetAnalyzer:
             window = int(params.get('window', 50))
             mms = self.data['Close'].rolling(window=window).mean()
             signals = np.where(self.data['Close'] > mms, 1.0, 0.0)
-            
+
         elif strat_name == "Cross MMS":
             short_w = int(params.get('short_w', 20))
             long_w = int(params.get('long_w', 50))
@@ -287,7 +288,7 @@ class SingleAssetAnalyzer:
 
     def find_best_params(self):
         """Teste plein de combinaisons et stocke les gagnantes."""
-        
+
         # 1. Optimisation Momentum
         best_sharpe = -999
         best_p = {'window': 50}
@@ -328,7 +329,7 @@ class SingleAssetAnalyzer:
         df = self.data.copy()
         last_date = df.index[-1]
         future_dates = [last_date + timedelta(days=i) for i in range(1, days_ahead + 1)]
-        
+
         # --- MODÈLE 1 : RÉGRESSION LINÉAIRE (CORRIGÉ) ---
         if model_type == "Linear Regression":
             df = df.reset_index()
@@ -346,12 +347,12 @@ class SingleAssetAnalyzer:
             actual_price_today = y[-1]
             offset = actual_price_today - theoretical_price_today
             preds = preds + offset
-            
+
             # Fix Volatilité Locale
             recent_returns = df['Close'].pct_change().tail(90)
             sigma_pct = recent_returns.std()
             std_dev = sigma_pct * df['Close'].iloc[-1]
-            
+
             return future_dates, preds, std_dev
 
         # --- MODÈLE 2 : ARIMA ---
