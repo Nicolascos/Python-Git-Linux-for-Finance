@@ -73,7 +73,7 @@ elif page == "📈 Single Asset":
 
     ticker_dict = {
     "Actions US 🇺🇸": ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA"],
-    "Crypto 💎": ["BTC-USD", "ETH-USD", "SOL-USD"],
+    "Crypto(prix pas à jour) 💎": ["BTC-USD", "ETH-USD", "SOL-USD"],
     "Indices 📈": ["^GSPC", "^DJI", "^IXIC"]
     }
 
@@ -176,16 +176,9 @@ elif page == "📈 Single Asset":
         df_strat = strategy_golden_cross(df)
         st.write("Stratégie utilisée : **Golden Cross / Death Cross**.")
 
+   
     # ------------------------------
-    # 3. Graphique prix + indicateurs
-    # ------------------------------
-    st.subheader("📉 Prix & Indicateurs")
-
-    fig_price = plot_price_with_indicators(df_strat)
-    st.plotly_chart(fig_price, use_container_width=True)
-
-    # ------------------------------
-    # 4. Courbes de valeur (equity curves)
+    # 3. Courbes de valeur (equity curves)
     # ------------------------------
     st.subheader("📈 Performance — Stratégie vs Buy & Hold")
 
@@ -193,7 +186,7 @@ elif page == "📈 Single Asset":
     st.plotly_chart(fig_equity, use_container_width=True)
 
     # ------------------------------
-    # 5. Indicateurs de performance (Comparaison B&H)
+    # 4. Indicateurs de performance (Comparaison B&H)
     # ------------------------------
     st.subheader("📊 Indicateurs quantitatifs")
 
