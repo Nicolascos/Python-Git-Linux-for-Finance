@@ -174,13 +174,35 @@ def compute_metrics(df: pd.DataFrame, column="Strategy"):
     - Sharpe Ratio (252 jours)
     - Max Drawdown
     - Volatilité annualisée
+    - Sortino Ratio
     """
 
+    # Rendements journaliers de la stratégie
     returns = df[column].pct_change().dropna()
 
-    # annualisation (marchés US ~ 252 jours)
-    sharpe = (returns.mean() / returns.std()) * np.sqrt(252) if returns.std() > 0 else 0
-    vol = returns.std() * np.sqrt(252)
+    if returns.empty:
+        return {
+            "Sharpe Ratio": 0.0,
+            "Volatility (ann.)": 0.0,
+            "Max Drawdown": 0.0,
+            "Sortino": 0.0,
+        }
+
+    # Volatilité / Sharpe
+    std = returns.std()
+    if std > 0:
+        sharpe = (returns.mean() / std) * np.sqrt(252)
+    else:
+        sharpe = 0.0
+    vol = std * np.sqrt(252)
+
+    # Sortino : uniquement la volatilité des rendements négatifs
+    downside = returns[returns < 0]
+    downside_std = downside.std()
+    if downside_std > 0:
+        sortino = (returns.mean() / downside_std) * np.sqrt(252)
+    else:
+        sortino = 0.0
 
     # Max drawdown
     cum_max = df[column].cummax()
@@ -191,6 +213,7 @@ def compute_metrics(df: pd.DataFrame, column="Strategy"):
         "Sharpe Ratio": round(sharpe, 3),
         "Volatility (ann.)": round(vol, 3),
         "Max Drawdown": round(max_dd, 3),
+        "Sortino": round(sortino, 3),
     }
 
 
@@ -225,34 +248,7 @@ class SingleAssetAnalyzer:
             # On ne met pas st.error ici, on le gère dans app.py
             return False
 
-    def compute_metrics(self, strategy_returns):
-        """Calcule Sharpe, Max Drawdown et Performance Totale."""
-        strategy_returns = strategy_returns.dropna()
-        if strategy_returns.empty:
-            return {'Sharpe': 0.0, 'Max Drawdown': 0.0, 'Total Perf': 0.0}
-
-        rf = 0.03
-        mean_ret = strategy_returns.mean()
-        std_ret = strategy_returns.std()
-
-        if std_ret == 0:
-            sharpe = 0
-        else:
-            sharpe = (mean_ret - (rf/252)) / std_ret * np.sqrt(252)
-
-        cum_ret = (1 + strategy_returns).cumprod()
-        peak = cum_ret.expanding(min_periods=1).max()
-        dd = (cum_ret - peak) / peak
-        max_dd = abs(dd.min())
-        total_perf = cum_ret.iloc[-1] - 1
-
-        return {
-            'Sharpe': round(sharpe, 2),
-            'Max Drawdown': f"{max_dd:.2%}",
-            'Total Perf': f"{total_perf:.2%}",
-            'Raw_Sharpe': sharpe
-        }
-
+    
     def run_strategy(self, strat_name, **params):
         """Exécute une stratégie spécifique avec des paramètres donnés."""
         signals = pd.Series(0, index=self.data.index)

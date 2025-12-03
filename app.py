@@ -142,7 +142,10 @@ elif page == "📈 Single Asset":
     st.success(f"Données chargées pour {symbol} du {df['Date'].iloc[0].date()} au {df['Date'].iloc[-1].date()}")
     st.dataframe(df.tail(), use_container_width=True)
 
-   
+    # ------------------------------
+    # 2. Application des stratégies
+    # ------------------------------
+    st.subheader("🧠 Stratégie appliquée")
 
     # Buy & Hold toujours calculé
     df_bh = strategy_buy_and_hold(df)
@@ -150,11 +153,11 @@ elif page == "📈 Single Asset":
     # Sélection stratégie
     if strategy_choice == "Buy & Hold":
         df_strat = df_bh.copy()
-       
+        st.write("Stratégie utilisée : **Buy & Hold**.")
 
     elif strategy_choice == "SMA Momentum":
         df_strat = strategy_sma(df, short=short, long=long)
-        
+        st.write(f"SMA Momentum — courte = {short}, longue = {long}")
 
     elif strategy_choice == "RSI":
         df_strat = strategy_rsi(df)
@@ -172,6 +175,7 @@ elif page == "📈 Single Asset":
     elif strategy_choice == "Golden Cross":
         df_strat = strategy_golden_cross(df)
         
+
    
     # ------------------------------
     # 3. Courbes de valeur (equity curves)
@@ -193,13 +197,15 @@ elif page == "📈 Single Asset":
     total_perf_strat = df_strat["Strategy"].iloc[-1] - 1
     total_perf_bh = df_bh["Strategy"].iloc[-1] - 1
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4,col5 = st.columns(5)
     
     # Sharpe Ratio
     sharpe_delta = metrics_strat['Sharpe Ratio'] - metrics_bh['Sharpe Ratio']
     col1.metric("Sharpe Ratio (Stratégie)", 
                 f"{metrics_strat['Sharpe Ratio']:.3f}", 
                 delta=f"{sharpe_delta:.3f} vs B&H")
+    
+
     
     # Max Drawdown
     dd_strat_display = f"{metrics_strat['Max Drawdown']*100:.2f}%"
@@ -217,12 +223,20 @@ elif page == "📈 Single Asset":
     col4.metric("Gain Total",
                 f"{total_perf_strat*100:.2f} %",
                 delta=f"{perf_delta*100:.2f} % vs B&H")
+    
+    # Sortino Ratio
+    sortino_delta = metrics_strat['Sortino'] - metrics_bh['Sortino']
+    col5.metric("Sortino Ratio (Stratégie)",
+            f"{metrics_strat['Sortino']:.3f}",
+            delta=f"{sortino_delta:.3f} vs B&H")
+
 
 
 # =========================================================
 # PAGE 3 — PORTFOLIO (PLACEHOLDER)
 # =========================================================
 elif page == "📊 Portfolio (bientôt)":
+
     st.title("📊 Portfolio — Multi-Actifs (à venir)")
 
     st.markdown(
