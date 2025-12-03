@@ -42,14 +42,6 @@ def get_history(symbol: str, lookback_days=365):
 
         df = df.reset_index()
 
-        df.rename(columns={
-            "Open": "Open",
-            "High": "High",
-            "Low": "Low",
-            "Close": "Close",
-            "Volume": "Volume",
-        }, inplace=True)
-
         return df
 
     except Exception as e:
