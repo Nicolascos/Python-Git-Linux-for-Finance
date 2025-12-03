@@ -142,10 +142,7 @@ elif page == "📈 Single Asset":
     st.success(f"Données chargées pour {symbol} du {df['Date'].iloc[0].date()} au {df['Date'].iloc[-1].date()}")
     st.dataframe(df.tail(), use_container_width=True)
 
-    # ------------------------------
-    # 2. Application des stratégies
-    # ------------------------------
-    st.subheader("🧠 Stratégie appliquée")
+   
 
     # Buy & Hold toujours calculé
     df_bh = strategy_buy_and_hold(df)
@@ -153,29 +150,28 @@ elif page == "📈 Single Asset":
     # Sélection stratégie
     if strategy_choice == "Buy & Hold":
         df_strat = df_bh.copy()
-        st.write("Stratégie utilisée : **Buy & Hold**.")
+       
 
     elif strategy_choice == "SMA Momentum":
         df_strat = strategy_sma(df, short=short, long=long)
-        st.write(f"SMA Momentum — courte = {short}, longue = {long}")
+        
 
     elif strategy_choice == "RSI":
         df_strat = strategy_rsi(df)
-        st.write("Stratégie utilisée : **RSI** (surachat/survente).")
+        
 
     elif strategy_choice == "MACD":
         df_strat = strategy_macd(df)
-        st.write("Stratégie utilisée : **MACD**.")
+        
 
     elif strategy_choice == "Bollinger":
         # Utilisation des nouveaux paramètres
         df_strat = strategy_bollinger(df, window=bb_window, num_std=bb_std)
-        st.write(f"Stratégie utilisée : **Bandes de Bollinger** — Fenêtre={bb_window}, Std={bb_std}.")
+        
 
     elif strategy_choice == "Golden Cross":
         df_strat = strategy_golden_cross(df)
-        st.write("Stratégie utilisée : **Golden Cross / Death Cross**.")
-
+        
    
     # ------------------------------
     # 3. Courbes de valeur (equity curves)
