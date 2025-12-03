@@ -194,9 +194,7 @@ def compute_metrics(df: pd.DataFrame, column="Strategy"):
     }
 
 
-# -------------------------------------------------------------
-# CLASSE SINGLE ASSET ANALYZER
-# -------------------------------------------------------------
+
 class SingleAssetAnalyzer:
     def __init__(self, ticker, start_date, end_date, initial_investment=1000):
         self.ticker = ticker
@@ -338,11 +336,11 @@ class SingleAssetAnalyzer:
             df['Date_Ordinal'] = df['Date'].map(pd.Timestamp.toordinal)
             X = df[['Date_Ordinal']].values
             y = df['Close'].values
-
+            
             model = LinearRegression().fit(X, y)
             future_ordinals = [[d.toordinal()] for d in future_dates]
             preds = model.predict(future_ordinals)
-
+            
             # Fix Ancrage
             last_day_ordinal = [[X[-1][0]]]
             theoretical_price_today = model.predict(last_day_ordinal)[0]
@@ -360,10 +358,10 @@ class SingleAssetAnalyzer:
         # --- MODÈLE 2 : ARIMA ---
         elif model_type == "ARIMA":
             history = df['Close'].values
-            model = ARIMA(history, order=(5, 1, 0))
+            model = ARIMA(history, order=(5,1,0))
             model_fit = model.fit()
             preds = model_fit.forecast(steps=days_ahead)
-
+            
             residuals = model_fit.resid
             std_dev = np.std(residuals[1:])
             return future_dates, preds, std_dev
@@ -377,27 +375,24 @@ class SingleAssetAnalyzer:
 
             X = df[['Lag1', 'Lag2', 'MA5']].values
             y = df['Close'].values
-
+            
             model = RandomForestRegressor(n_estimators=100, random_state=42)
             model.fit(X, y)
 
             preds = []
             current_lag1 = df['Close'].iloc[-1]
             current_lag2 = df['Close'].iloc[-2]
-            # Keep track of recent values for rolling MA calculation
-            recent_values = list(df['Close'].tail(5).values)
+            current_ma = df['MA5'].iloc[-1]
 
             for _ in range(days_ahead):
-                current_ma = np.mean(recent_values[-5:])
                 pred = model.predict([[current_lag1, current_lag2, current_ma]])[0]
                 preds.append(pred)
                 current_lag2 = current_lag1
                 current_lag1 = pred
-                recent_values.append(pred)
-
+            
             train_preds = model.predict(X)
             std_dev = np.std(y - train_preds)
-
+            
             return future_dates, np.array(preds), std_dev
-
+        
         return [], [], 0
