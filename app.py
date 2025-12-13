@@ -185,6 +185,66 @@ elif page == "📈 Single Asset":
     fig_equity = plot_equity(df_bh, df_strat)
     st.plotly_chart(fig_equity, use_container_width=True)
 
+    # =========================================================
+    # 🔥 COMPARAISON MULTI-STRATÉGIES
+    # =========================================================
+    st.subheader("⚡ Comparaison Multi-Stratégies")
+
+    # Calcul des stratégies
+    df_sma = strategy_sma(df, short=20, long=50)
+    df_rsi = strategy_rsi(df)
+    df_macd = strategy_macd(df)
+    df_bb = strategy_bollinger(df, window=20, num_std=2)
+    df_gc = strategy_golden_cross(df)
+
+    df_compare = pd.DataFrame({
+        "Buy & Hold": df_bh["Strategy"],
+        "SMA": df_sma["Strategy"],
+        "RSI": df_rsi["Strategy"],
+        "MACD": df_macd["Strategy"],
+        "Bollinger": df_bb["Strategy"],
+        "Golden Cross": df_gc["Strategy"]
+    })
+
+    st.line_chart(df_compare)
+
+    # =========================================================
+    # 📊 TABLEAU DES METRICS POUR TOUTES LES STRATÉGIES
+    # =========================================================
+    st.subheader("📘 Tableau de synthèse des performances")
+
+    strategies_results = {
+        "Buy & Hold": df_bh,
+        "SMA": df_sma,
+        "RSI": df_rsi,
+        "MACD": df_macd,
+        "Bollinger": df_bb,
+        "Golden Cross": df_gc
+    }
+
+    table_stats = []
+
+    for name, df_s in strategies_results.items():
+        metrics = compute_metrics(df_s)
+        table_stats.append({
+            "Stratégie": name,
+            "Sharpe Ratio": metrics["Sharpe Ratio"],
+            "Sortino Ratio": metrics["Sortino"],
+            "Volatilité (ann.)": metrics["Volatility (ann.)"],
+            "Max Drawdown": metrics["Max Drawdown"],
+            "Performance totale (%)": (df_s["Strategy"].iloc[-1] - 1) * 100
+        })
+
+    df_stats = (
+        pd.DataFrame(table_stats)
+        .set_index("Stratégie")
+        .sort_values("Sharpe Ratio", ascending=False)
+    )
+
+    st.dataframe(df_stats)
+
+
+
     # ------------------------------
     # 4. Indicateurs de performance (Comparaison B&H)
     # ------------------------------
