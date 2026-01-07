@@ -29,11 +29,6 @@ def get_live_price(symbol: str):
 # 2. Récupération historique OHLC
 # ---------------------------------------------------------
 def get_history(symbol: str, lookback_days=365):
-    """
-    Récupère les prix historiques OHLC via yfinance.
-    Retourne un DataFrame propre compatible avec ton projet.
-    """
-
     try:
         df = yf.download(symbol, period=f"{lookback_days}d", interval="1d")
 
@@ -41,6 +36,17 @@ def get_history(symbol: str, lookback_days=365):
             return None
 
         df = df.reset_index()
+
+        # --- FIX MultiIndex colonnes (Close/AAPL etc.) ---
+        if isinstance(df.columns, pd.MultiIndex):
+            # On garde le 1er niveau (Date, Open, High...) et on drop le ticker
+            df.columns = [c[0] for c in df.columns]
+
+        # normalisation du nom de date
+        if "Datetime" in df.columns and "Date" not in df.columns:
+            df = df.rename(columns={"Datetime": "Date"})
+        if "index" in df.columns and "Date" not in df.columns:
+            df = df.rename(columns={"index": "Date"})
 
         return df
 

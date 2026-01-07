@@ -124,23 +124,27 @@ def strategy_macd(df: pd.DataFrame):
 def strategy_bollinger(df: pd.DataFrame, window=20, num_std=2):
     df = df.copy()
 
-    df["MA"] = df["Close"].rolling(window).mean()
-    df["STD"] = df["Close"].rolling(window).std()
+    close = df["Close"]
+    if isinstance(close, pd.DataFrame):
+        # prends la première colonne, ou sélectionne ton ticker explicitement
+        close = close.iloc[:, 0]
 
+    df["MA"] = close.rolling(window).mean()
+    df["STD"] = close.rolling(window).std()
     df["Upper"] = df["MA"] + num_std * df["STD"]
     df["Lower"] = df["MA"] - num_std * df["STD"]
 
     df["Signal"] = 0
-    # Correction (Cause de l'erreur) : Utiliser .values pour garantir l'alignement
-    df.loc[df["Close"].values < df["Lower"].values, "Signal"] = 1   # Achat
-    df.loc[df["Close"].values > df["Upper"].values, "Signal"] = -1  # Vente
+    df.loc[close < df["Lower"], "Signal"] = 1
+    df.loc[close > df["Upper"], "Signal"] = -1
 
     df["Position"] = df["Signal"].shift(1).fillna(0)
-
-    df["Returns"] = df["Close"].pct_change().fillna(0)
+    df["Returns"] = close.pct_change().fillna(0)
     df["Strategy"] = (1 + df["Returns"] * df["Position"]).cumprod()
 
     return df
+
+
 
 
 # -------------------------------------------------------------

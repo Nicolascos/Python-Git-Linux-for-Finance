@@ -1,6 +1,144 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+from modules.plots import plot_price_with_indicators, plot_equity
+import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
+
+
+def ensure_date_column(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+
+    # 1) si yfinance intraday : "Datetime"
+    if "Date" in out.columns:
+        return out
+    if "Datetime" in out.columns:
+        return out.rename(columns={"Datetime": "Date"})
+
+    # 2) si "Date" est l'index (ou Datetime)
+    if out.index.name in ("Date", "Datetime"):
+        out = out.reset_index()
+        if "Datetime" in out.columns and "Date" not in out.columns:
+            out = out.rename(columns={"Datetime": "Date"})
+        return out
+
+    # 3) index anonyme -> reset_index crée "index"
+    out = out.reset_index()
+    if "Date" not in out.columns and "index" in out.columns:
+        out = out.rename(columns={"index": "Date"})
+    return out
+
+def normalize_dedup_date(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+
+    # 1) Si Date est déjà une colonne
+    if "Date" in out.columns:
+        out["Date"] = pd.to_datetime(out["Date"]).dt.normalize()
+        out = out.sort_values("Date")
+        out = out.drop_duplicates(subset=["Date"], keep="first")
+        out = out.reset_index(drop=True)
+        return out
+
+    # 2) Sinon, on considère que la date est dans l'index (souvent DatetimeIndex)
+    idx = out.index
+    if not isinstance(idx, pd.DatetimeIndex):
+        idx = pd.to_datetime(idx, errors="coerce")
+    idx = idx.normalize()
+
+    out = out.copy()
+    out.index = idx
+    out = out.sort_index()
+    out = out[~out.index.duplicated(keep="first")]
+
+    # remettre une vraie colonne Date
+    out = out.reset_index().rename(columns={"index": "Date"})
+    return out
+
+def build_gated_equity(df_full: pd.DataFrame,
+                       df_strat_slice: pd.DataFrame,
+                       start_d,
+                       end_d):
+    """
+    Courbe sur toute la période :
+    - Buy&Hold avant start
+    - Stratégie entre start et end (ancrée sur BH à l’entrée)
+    - Buy&Hold après end en gardant la perf (BH "scalé" pour continuité)
+    Retourne: out, start_ts_eff, end_ts_eff
+    """
+
+    out = normalize_dedup_date(df_full)
+    out["Date"] = pd.to_datetime(out["Date"]).dt.normalize()
+    out = out.sort_values("Date").drop_duplicates(subset=["Date"]).reset_index(drop=True)
+
+    # Close propre
+    close = out["Close"]
+    if isinstance(close, pd.DataFrame):
+        close = close.iloc[:, 0]
+
+    out["Returns"] = close.pct_change().fillna(0.0)
+
+    # Buy&Hold "sous-jacent" sur toute la période (base 1)
+    out["BH"] = (1.0 + out["Returns"]).cumprod()
+
+    # --- stratégie (fenêtre) ---
+    strat = normalize_dedup_date(df_strat_slice)
+    strat["Date"] = pd.to_datetime(strat["Date"]).dt.normalize()
+    strat = strat.sort_values("Date").drop_duplicates(subset=["Date"])
+
+    if "Position" in strat.columns:
+        pos_s = strat.set_index("Date")["Position"].astype(float)
+    elif "Signal" in strat.columns:
+        pos_s = strat.set_index("Date")["Signal"].shift(1).fillna(0.0).astype(float)
+    else:
+        pos_s = pd.Series(dtype=float)
+
+    out_i = out.set_index("Date")
+
+    # snap start/end au plus proche jour disponible
+    start_ts = pd.Timestamp(start_d).normalize()
+    end_ts   = pd.Timestamp(end_d).normalize()
+
+    dates = out_i.index
+    start_ts_eff = dates[dates.get_indexer([start_ts], method="nearest")][0]
+    end_ts_eff   = dates[dates.get_indexer([end_ts], method="nearest")][0]
+    if end_ts_eff < start_ts_eff:
+        start_ts_eff, end_ts_eff = end_ts_eff, start_ts_eff
+
+    active = (out_i.index >= start_ts_eff) & (out_i.index <= end_ts_eff)
+
+    # positions alignées sur tout l’index
+    pos_aligned = pos_s.reindex(out_i.index).fillna(0.0)
+
+    # 1) perf stratégie RELATIVE (base 1) uniquement sur la fenêtre
+    r = out_i["Returns"]
+    strat_rel = pd.Series(1.0, index=out_i.index)
+
+    # cumprod dans la fenêtre (ancrée à 1 au début de fenêtre)
+    strat_rel.loc[active] = (1.0 + r.loc[active] * pos_aligned.loc[active]).cumprod()
+    strat_rel.loc[active] /= strat_rel.loc[start_ts_eff]  # force = 1 à l'entrée
+
+    # 2) ancrage sur BH à l’entrée
+    bh_start = float(out_i.loc[start_ts_eff, "BH"])
+    strategy_window = bh_start * strat_rel
+
+    # 3) hors fenêtre : BH avant, BH scalé après pour continuité
+    out_i["Strategy"] = out_i["BH"]  # avant start => BH
+
+    out_i.loc[active, "Strategy"] = strategy_window.loc[active]
+
+    # scale après end pour garder la perf atteinte
+    strat_end = float(out_i.loc[end_ts_eff, "Strategy"])
+    bh_end = float(out_i.loc[end_ts_eff, "BH"])
+    scale = strat_end / bh_end if bh_end != 0 else 1.0
+
+    after = out_i.index > end_ts_eff
+    out_i.loc[after, "Strategy"] = out_i.loc[after, "BH"] * scale
+
+    out = out_i.reset_index()
+    return out, start_ts_eff, end_ts_eff
+
+
 
 # ---------------------------------------------------------
 # CONFIG STREAMLIT — DOIT ÊTRE EN PREMIER
@@ -120,12 +258,19 @@ elif page == "📈 Single Asset":
         step=50
     )
 
-    if st.sidebar.button("🚀 Lancer l’analyse"):
-        st.session_state["run_single"] = True
+    with st.sidebar.form("run_form"):
+        submitted = st.form_submit_button("🚀 Lancer l’analyse")
 
-    if "run_single" not in st.session_state:
+    if not submitted and "run_single" not in st.session_state:
         st.info("Configure les paramètres puis clique sur **🚀 Lancer l’analyse**.")
         st.stop()
+
+    if submitted:
+        st.session_state["run_single"] = True
+
+    if st.sidebar.button("🔄 Reset analyse"):
+        st.session_state.pop("run_single", None)
+        st.rerun()
 
     # ------------------------------
     # 1. Chargement des données
@@ -143,12 +288,44 @@ elif page == "📈 Single Asset":
     st.dataframe(df.tail(), use_container_width=True)
 
     # ------------------------------
+    # 1.b Sélection de la période (Date d'entrée / sortie)
+    # ------------------------------
+    df = df.copy()
+    df["Date"] = pd.to_datetime(df["Date"])
+    df = df.sort_values("Date").reset_index(drop=True)
+
+    st.sidebar.subheader("📅 Période d'analyse")
+
+    min_d = df["Date"].min().date()
+    max_d = df["Date"].max().date()
+
+    start_d, end_d = st.sidebar.slider(
+        "Date d'entrée / sortie",
+        min_value=min_d,
+        max_value=max_d,
+        value=(min_d, max_d),
+        format="YYYY-MM-DD"
+    )
+
+    mask = (df["Date"].dt.date >= start_d) & (df["Date"].dt.date <= end_d)
+    df_slice = df.loc[mask].copy()
+
+    if df_slice.empty or len(df_slice) < 30:
+        st.warning("⚠️ Période trop courte (minimum ~30 jours conseillé).")
+        st.stop()
+
+    st.info(f"📆 Analyse sur la période : {start_d} → {end_d} ({len(df_slice)} points)")
+
+
+    # ------------------------------
     # 2. Application des stratégies
     # ------------------------------
     st.subheader("🧠 Stratégie appliquée")
 
     # Buy & Hold toujours calculé
-    df_bh = strategy_buy_and_hold(df)
+    df_bh_full = strategy_buy_and_hold(df)       # B&H complet pour les visus
+    df_bh = strategy_buy_and_hold(df_slice)      # B&H fenêtre pour les metrics si tu veux
+
 
     # Sélection stratégie
     if strategy_choice == "Buy & Hold":
@@ -156,25 +333,30 @@ elif page == "📈 Single Asset":
         st.write("Stratégie utilisée : **Buy & Hold**.")
 
     elif strategy_choice == "SMA Momentum":
-        df_strat = strategy_sma(df, short=short, long=long)
+        df_strat = strategy_sma(df_slice, short=short, long=long)
         st.write(f"SMA Momentum — courte = {short}, longue = {long}")
 
     elif strategy_choice == "RSI":
-        df_strat = strategy_rsi(df)
+        df_strat = strategy_rsi(df_slice)
         
 
     elif strategy_choice == "MACD":
-        df_strat = strategy_macd(df)
+        df_strat = strategy_macd(df_slice)
         
 
     elif strategy_choice == "Bollinger":
         # Utilisation des nouveaux paramètres
-        df_strat = strategy_bollinger(df, window=bb_window, num_std=bb_std)
+        df_strat = strategy_bollinger(df_slice, window=bb_window, num_std=bb_std)
         
 
     elif strategy_choice == "Golden Cross":
-        df_strat = strategy_golden_cross(df)
+        df_strat = strategy_golden_cross(df_slice)
         
+    df_bh_full = strategy_buy_and_hold(df)   # B&H sur toute la période (visu)
+
+
+    df_strat_gated, start_ts_eff, end_ts_eff = build_gated_equity(df, df_strat, start_d, end_d)
+
 
    
     # ------------------------------
@@ -182,8 +364,109 @@ elif page == "📈 Single Asset":
     # ------------------------------
     st.subheader("📈 Performance — Stratégie vs Buy & Hold")
 
-    fig_equity = plot_equity(df_bh, df_strat)
-    st.plotly_chart(fig_equity, use_container_width=True)
+    g = df_strat_gated.copy()
+    g["Date"] = pd.to_datetime(g["Date"])
+
+    # Masques (fenêtre et après-sortie)
+    m_active = (g["Date"] >= start_ts_eff) & (g["Date"] <= end_ts_eff)
+    m_after  = g["Date"] > end_ts_eff
+
+    # Séries segmentées (NaN hors zone => Plotly coupe la ligne)
+    g["Strat_Window"] = np.where(m_active, g["Strategy"], np.nan)
+    g["Port_After"]   = np.where(m_after,  g["Strategy"], np.nan)
+
+    # Figure
+    fig_equity = go.Figure()
+
+    # Buy&Hold (sous-jacent)
+    fig_equity.add_trace(go.Scatter(
+        x=g["Date"], y=g["BH"],
+        mode="lines",
+        name="Buy & Hold"
+    ))
+
+    # Stratégie uniquement pendant la fenêtre
+    fig_equity.add_trace(go.Scatter(
+        x=g["Date"], y=g["Strat_Window"],
+        mode="lines",
+        name="Stratégie (active)"
+    ))
+
+    # Après sortie : portefeuille en Buy&Hold (scalé, continuité)
+    fig_equity.add_trace(go.Scatter(
+        x=g["Date"], y=g["Port_After"],
+        mode="lines",
+        name="Après sortie : Buy&Hold (portefeuille)"
+    ))
+
+    # Points entrée/sortie (sur la courbe "Strategy")
+    y_start = float(g.loc[g["Date"] == start_ts_eff, "Strategy"].iloc[0])
+    y_end   = float(g.loc[g["Date"] == end_ts_eff, "Strategy"].iloc[0])
+
+    # Points entrée/sortie (UNE seule gommette chacun, plus petit, pas dans la légende)
+    fig_equity.add_trace(go.Scatter(
+        x=[start_ts_eff],
+        y=[y_start],
+        mode="markers",
+        marker=dict(
+            size=7,                      # petite gommette
+            color="#00E676",              # vert vif
+            symbol="circle",
+            line=dict(color="black", width=1)
+        ),
+        name="Entrée",
+        showlegend=True,
+        hovertemplate=(
+            "<b>Entrée</b><br>"
+            "Date: %{x|%Y-%m-%d}<br>"
+            "Valeur: %{y:.3f}"
+            "<extra></extra>"
+        )
+    ))
+
+    fig_equity.add_trace(go.Scatter(
+        x=[end_ts_eff],
+        y=[y_end],
+        mode="markers",
+        marker=dict(
+            size=7,                      # petite gommette
+            color="#FF5252",              # rouge vif
+            symbol="circle",
+            line=dict(color="black", width=1)
+        ),
+        name="Sortie",
+        showlegend=True,
+        hovertemplate=(
+            "<b>Sortie</b><br>"
+            "Date: %{x|%Y-%m-%d}<br>"
+            "Valeur: %{y:.3f}"
+            "<extra></extra>"
+        )
+    ))
+
+
+    # Ligne verticale + annotation (Option 2)
+    fig_equity.add_vline(
+    x=end_ts_eff,
+    line_width=2,
+    line_dash="dash",
+    line_color="rgba(255,255,255,0.65)"  # plus foncé/visible
+    )
+
+
+    fig_equity.update_layout(
+        template="plotly_dark",
+        height=500,
+        title="Comparaison des stratégies",
+        xaxis_title="Date",
+        yaxis_title="Évolution portefeuille (base 1)"
+    )
+
+    st.plotly_chart(fig_equity, use_container_width=True, key="equity_main")
+
+    st.caption("Après la date de sortie, le portefeuille repasse en Buy&Hold en conservant la performance atteinte à la sortie.")
+
+    
 
     # =========================================================
     # 🔥 COMPARAISON MULTI-STRATÉGIES
@@ -191,23 +474,27 @@ elif page == "📈 Single Asset":
     st.subheader("⚡ Comparaison Multi-Stratégies")
 
     # Calcul des stratégies
-    df_sma = strategy_sma(df, short=20, long=50)
-    df_rsi = strategy_rsi(df)
-    df_macd = strategy_macd(df)
-    df_bb = strategy_bollinger(df, window=20, num_std=2)
-    df_gc = strategy_golden_cross(df)
+    df_sma = strategy_sma(df_slice, short=20, long=50)
+    df_rsi = strategy_rsi(df_slice)
+    df_macd = strategy_macd(df_slice)
+    df_bb = strategy_bollinger(df_slice, window=20, num_std=2)
+    df_gc = strategy_golden_cross(df_slice)
 
     df_compare = pd.DataFrame({
-        "Buy & Hold": df_bh["Strategy"],
-        "SMA": df_sma["Strategy"],
-        "RSI": df_rsi["Strategy"],
-        "MACD": df_macd["Strategy"],
-        "Bollinger": df_bb["Strategy"],
-        "Golden Cross": df_gc["Strategy"]
-    })
+        "Buy & Hold": df_bh["Strategy"].values,
+        "SMA": df_sma["Strategy"].values,
+        "RSI": df_rsi["Strategy"].values,
+        "MACD": df_macd["Strategy"].values,
+        "Bollinger": df_bb["Strategy"].values,
+        "Golden Cross": df_gc["Strategy"].values
+    }, index=pd.to_datetime(df_slice["Date"]))
+
+    # optionnel mais conseillé : enlever les lignes incomplètes (rolling windows)
+    df_compare = df_compare.dropna(how="any")
 
     st.line_chart(df_compare)
 
+    
     # =========================================================
     # 📊 TABLEAU DES METRICS POUR TOUTES LES STRATÉGIES
     # =========================================================
