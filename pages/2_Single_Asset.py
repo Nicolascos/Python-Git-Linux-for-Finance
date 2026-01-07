@@ -75,20 +75,10 @@ if st.sidebar.button("🔄 Reset analyse"):
     st.session_state.pop("run_single", None)
     st.rerun()
 
-# ------------------------------
-# Prix live
-# ------------------------------
-live_price = get_live_price(symbol)
-if live_price is not None:
-    st.subheader(f"🏷️ Prix Actuel {symbol} : **{live_price:,.2f} $**")
-    st.markdown("---")
-else:
-    st.error(f"❌ Impossible de récupérer le prix live pour {symbol}.")
 
 # ------------------------------
 # 1. Chargement des données
 # ------------------------------
-st.subheader("📡 Données historiques")
 
 df = load_historical_data(symbol, lookback_days=lookback)
 
@@ -98,11 +88,6 @@ if df is None or df.empty:
 
 df = prepare_ohlc_df(df)
 
-
-st.success(
-    f"Données chargées pour {symbol} du {df['Date'].iloc[0].date()} au {df['Date'].iloc[-1].date()}"
-)
-st.dataframe(df.tail(), use_container_width=True)
 
 # ------------------------------
 # 1.b Fenêtre (Date d'entrée / sortie)
@@ -127,12 +112,12 @@ except ValueError:
     st.stop()
 
 
-st.info(f"📆 Analyse sur la période : {start_d} → {end_d} ({len(df_slice)} points)")
+
 
 # ------------------------------
 # 2. Application des stratégies
 # ------------------------------
-st.subheader("🧠 Stratégie appliquée")
+
 
 # Buy & Hold
 df_bh_full = strategy_buy_and_hold(df)      # pour BH global / visu
@@ -141,11 +126,11 @@ df_bh = strategy_buy_and_hold(df_slice)     # pour comparaison sur fenêtre
 # Stratégie choisie
 if strategy_choice == "Buy & Hold":
     df_strat = df_bh.copy()
-    st.write("Stratégie utilisée : **Buy & Hold**.")
+    
 
 elif strategy_choice == "SMA Momentum":
     df_strat = strategy_sma(df_slice, short=short, long=long)
-    st.write(f"SMA Momentum — courte = {short}, longue = {long}")
+    
 
 elif strategy_choice == "RSI":
     df_strat = strategy_rsi(df_slice)
@@ -162,28 +147,83 @@ elif strategy_choice == "Golden Cross":
 # Courbe “gated” (BH -> Stratégie -> BH scalé)
 df_strat_gated, start_ts_eff, end_ts_eff = build_gated_equity(df, df_strat, start_d, end_d)
 
-# ------------------------------
-# 3. Equity curve (Plotly)
-# ------------------------------
-st.subheader("📈 Performance — Stratégie vs Buy & Hold")
 
-fig_equity = plot_equity_gated(
-    df_strat_gated=df_strat_gated,
-    start_ts_eff=start_ts_eff,
-    end_ts_eff=end_ts_eff,
-    title="Comparaison des stratégies",
-)
+# =========================================================
+# TABS
+# =========================================================
+tab1, tab2, tab3 = st.tabs(["📊 Performance", "⚡ Comparaison", "🔮 Prédiction"])
 
-st.plotly_chart(fig_equity, use_container_width=True, key="equity_main")
+with tab1:
+    # Prix live
+    live_price = get_live_price(symbol)
+    if live_price is not None:
+        st.subheader(f"🏷️ Prix Actuel {symbol} : **{live_price:,.2f} $**")
+        st.markdown("---")
+    else:
+        st.error(f"❌ Impossible de récupérer le prix live pour {symbol}.")
 
-st.caption(
-    "Après la date de sortie, le portefeuille repasse en Buy&Hold en conservant la performance atteinte à la sortie."
-)
+    # Données historiques
+    st.subheader("📡 Données historiques")
+    st.success(
+        f"Données chargées pour {symbol} du {df['Date'].iloc[0].date()} au {df['Date'].iloc[-1].date()}"
+    )
+    st.dataframe(df.tail(), use_container_width=True)
+
+    # Info période
+    st.info(f"📆 Analyse sur la période : {start_d} → {end_d} ({len(df_slice)} points)")
+
+    # Stratégie utilisée
+    st.subheader("🧠 Stratégie appliquée")
+    if strategy_choice == "SMA Momentum":
+        st.write(f"Stratégie utilisée : **{strategy_choice}** — courte={short}, longue={long}")
+    elif strategy_choice == "Bollinger":
+        st.write(f"Stratégie utilisée : **{strategy_choice}** — window={bb_window}, std={bb_std}")
+    else:
+        st.write(f"Stratégie utilisée : **{strategy_choice}**")
+
+    # Graph principal
+    st.subheader("📈 Performance — Stratégie vs Buy & Hold")
+    fig_equity = plot_equity_gated(
+        df_strat_gated=df_strat_gated,
+        start_ts_eff=start_ts_eff,
+        end_ts_eff=end_ts_eff,
+        title="Comparaison des stratégies",
+    )
+    st.plotly_chart(fig_equity, use_container_width=True, key="equity_main")
+    st.caption(
+        "Après la date de sortie, le portefeuille repasse en Buy&Hold en conservant la performance atteinte à la sortie."
+    )
+
+    # Metrics cards
+    st.subheader("📊 Indicateurs quantitatifs")
+
+    metrics_strat = compute_metrics(df_strat)
+    metrics_bh = compute_metrics(df_bh)
+
+    total_perf_strat = df_strat["Strategy"].iloc[-1] - 1
+    total_perf_bh = df_bh["Strategy"].iloc[-1] - 1
+
+    col1, col2, col3, col4, col5 = st.columns(5)
+
+    sharpe_delta = metrics_strat["Sharpe Ratio"] - metrics_bh["Sharpe Ratio"]
+    col1.metric("Sharpe Ratio", f"{metrics_strat['Sharpe Ratio']:.3f}", delta=f"{sharpe_delta:.3f} vs B&H")
+
+    dd_strat_display = f"{metrics_strat['Max Drawdown']*100:.2f}%"
+    dd_bh_display = f"{metrics_bh['Max Drawdown']*100:.2f}%"
+    col2.metric("Max Drawdown", dd_strat_display, delta=f"B&H: {dd_bh_display}")
+
+    vol_delta = metrics_strat["Volatility (ann.)"] - metrics_bh["Volatility (ann.)"]
+    col3.metric("Volatilité (ann.)", f"{metrics_strat['Volatility (ann.)']:.2%}", delta=f"{vol_delta:.2%} vs B&H")
+
+    perf_delta = total_perf_strat - total_perf_bh
+    col4.metric("Gain Total", f"{total_perf_strat*100:.2f} %", delta=f"{perf_delta*100:.2f} % vs B&H")
+
+    sortino_delta = metrics_strat["Sortino"] - metrics_bh["Sortino"]
+    col5.metric("Sortino Ratio", f"{metrics_strat['Sortino']:.3f}", delta=f"{sortino_delta:.3f} vs B&H")
 
 # =========================================================
 # 🔥 COMPARAISON MULTI-STRATÉGIES
 # =========================================================
-st.subheader("⚡ Comparaison Multi-Stratégies")
 
 df_sma = strategy_sma(df_slice, short=20, long=50)
 df_rsi = strategy_rsi(df_slice)
@@ -206,12 +246,11 @@ df_compare = pd.DataFrame(
 # conseillé : enlever les lignes incomplètes (rolling windows)
 df_compare = df_compare.dropna(how="any")
 
-st.line_chart(df_compare)
 
 # =========================================================
 # 📊 TABLEAU DES METRICS POUR TOUTES LES STRATÉGIES
 # =========================================================
-st.subheader("📘 Tableau de synthèse des performances")
+
 
 strategies_results = {
     "Buy & Hold": df_bh,
@@ -242,54 +281,16 @@ df_stats = (
     .sort_values("Sharpe Ratio", ascending=False)
 )
 
-st.dataframe(df_stats, use_container_width=True)
 
-# =========================================================
-# 📊 INDICATEURS (stratégie choisie vs B&H)
-# =========================================================
-st.subheader("📊 Indicateurs quantitatifs")
+with tab2:
+    st.subheader("⚡ Comparaison Multi-Stratégies")
+    st.line_chart(df_compare)
 
-metrics_strat = compute_metrics(df_strat)
-metrics_bh = compute_metrics(df_bh)
+    st.subheader("📘 Tableau de synthèse des performances")
+    st.dataframe(df_stats, use_container_width=True)
 
-total_perf_strat = df_strat["Strategy"].iloc[-1] - 1
-total_perf_bh = df_bh["Strategy"].iloc[-1] - 1
 
-col1, col2, col3, col4, col5 = st.columns(5)
+with tab3:
+    st.subheader("🔮 Prédiction")
+    st.info("À venir.")
 
-# Sharpe
-sharpe_delta = metrics_strat["Sharpe Ratio"] - metrics_bh["Sharpe Ratio"]
-col1.metric(
-    "Sharpe Ratio (Stratégie)",
-    f"{metrics_strat['Sharpe Ratio']:.3f}",
-    delta=f"{sharpe_delta:.3f} vs B&H",
-)
-
-# Max Drawdown
-dd_strat_display = f"{metrics_strat['Max Drawdown']*100:.2f}%"
-dd_bh_display = f"{metrics_bh['Max Drawdown']*100:.2f}%"
-col2.metric("Max Drawdown", dd_strat_display, delta=f"B&H: {dd_bh_display}")
-
-# Volatilité annualisée
-vol_delta = metrics_strat["Volatility (ann.)"] - metrics_bh["Volatility (ann.)"]
-col3.metric(
-    "Volatilité (ann.)",
-    f"{metrics_strat['Volatility (ann.)']:.2%}",
-    delta=f"{vol_delta:.2%} vs B&H",
-)
-
-# Gain Total
-perf_delta = total_perf_strat - total_perf_bh
-col4.metric(
-    "Gain Total",
-    f"{total_perf_strat*100:.2f} %",
-    delta=f"{perf_delta*100:.2f} % vs B&H",
-)
-
-# Sortino
-sortino_delta = metrics_strat["Sortino"] - metrics_bh["Sortino"]
-col5.metric(
-    "Sortino Ratio (Stratégie)",
-    f"{metrics_strat['Sortino']:.3f}",
-    delta=f"{sortino_delta:.3f} vs B&H",
-)
