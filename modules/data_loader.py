@@ -2,6 +2,7 @@
 
 import pandas as pd
 import yfinance as yf
+import streamlit as st
 
 # ---------------------------------------------------------
 # 1. Récupération du prix "live" (en réalité dernier prix connu)
@@ -53,3 +54,11 @@ def get_history(symbol: str, lookback_days=365):
     except Exception as e:
         print("ERROR get_history:", e)
         return None
+
+# ---------------------------------------------------------
+# CACHING — données historiques
+# ---------------------------------------------------------
+@st.cache_data(ttl=300)
+def load_historical_data(symbol: str, lookback_days: int) -> pd.DataFrame:
+    from modules.data_loader import get_history
+    return get_history(symbol, lookback_days=lookback_days)
