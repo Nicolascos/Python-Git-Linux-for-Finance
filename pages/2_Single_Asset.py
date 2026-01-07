@@ -97,13 +97,27 @@ st.sidebar.subheader("📅 Période d'analyse")
 min_d = df["Date"].min().date()
 max_d = df["Date"].max().date()
 
-start_d, end_d = st.sidebar.slider(
-    "Date d'entrée / sortie",
+# Deux date pickers (calendrier) : Début / Fin
+start_d = st.sidebar.date_input(
+    "Début",
+    value=min_d,
     min_value=min_d,
     max_value=max_d,
-    value=(min_d, max_d),
-    format="YYYY-MM-DD",
+    format="YYYY/MM/DD",
 )
+
+end_d = st.sidebar.date_input(
+    "Fin",
+    value=max_d,
+    min_value=min_d,
+    max_value=max_d,
+    format="YYYY/MM/DD",
+)
+
+# Sécurité si l'utilisateur inverse les dates
+if start_d > end_d:
+    st.sidebar.error("⚠️ La date de début doit être avant la date de fin.")
+    st.stop()
 
 try:
     df_slice = slice_by_date_window(df, start_d, end_d, min_points=30)
