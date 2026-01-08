@@ -17,10 +17,27 @@ from modules.strategy_single import (
 )
 from modules.plots import plot_equity_segments
 import json
+from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+from statsmodels.tsa.arima.model import ARIMA
+from modules.predictions_portfolio import (
+    make_features_portfolio,
+    train_test_split_time_portfolio,
+    rf_predict_with_ci_portfolio,
+    linear_predict_with_ci_portfolio,
+    returns_to_portfolio_path,
+    rollout_one_step_portfolio,
+    rf_rollout_paths_fast_portfolio,
+)
+from scipy.stats import norm
+
+
 
 st.title("📊 Portfolio — Multi-Actifs")
 
-tab1, tab2, tab3 = st.tabs(["🧱 Création", "📈 Stratégies", "⚡ Simulations"])
+tab1, tab2, tab3, tab4 = st.tabs(["🧱 Création", "📈 Stratégies", "⚡ Simulations", "🛡️ Risques & 🔮 Prédiction"])
+
 
 ticker_dict = {
     "Actions US 🇺🇸": ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA"],
@@ -522,3 +539,207 @@ with tab3:
             "Buy & Hold": metrics_bh,
         })
         st.dataframe(df_stats, use_container_width=True)
+
+
+with tab4:
+    st.subheader("🛡️ Risques & 🔮 Prédiction (Portefeuille)")
+
+    # ---- même fenêtre que tab2
+    start_d = st.session_state.get("pf_backtest_slider", (None, None))[0]
+    end_d   = st.session_state.get("pf_backtest_slider", (None, None))[1]
+    if start_d is None or end_d is None:
+        st.info("Choisis d'abord une fenêtre de backtest dans l'onglet Stratégies.")
+        st.stop()
+
+    try:
+        df_pf_slice = slice_by_date_window(df_portfolio, start_d, end_d, min_points=60)
+    except ValueError:
+        st.warning("⚠️ Fenêtre trop courte (minimum ~60 jours conseillé pour risques & prédiction).")
+        st.stop()
+
+    df_pf_slice = df_pf_slice.sort_values("Date").reset_index(drop=True)
+
+    # =========================================================
+    # A) RISQUES
+    # =========================================================
+    st.markdown("## 🛡️ Risques")
+
+    # returns (log)
+    r = np.log(df_pf_slice["Close"]).diff().dropna()
+    if len(r) < 30:
+        st.warning("Pas assez de points pour calculer les risques.")
+        st.stop()
+
+    ann_vol = r.std() * np.sqrt(252)
+    ann_ret = r.mean() * 252
+    sharpe  = ann_ret / (ann_vol + 1e-12)
+
+    # Max drawdown sur Close (ou sur equity, c'est équivalent ici)
+    close = df_pf_slice["Close"].values
+    peak = np.maximum.accumulate(close)
+    dd = close / peak - 1.0
+    max_dd = dd.min()
+
+    # VaR / CVaR (historique)
+    alpha = st.slider("Niveau de confiance VaR/CVaR", 0.90, 0.99, 0.95, 0.01)
+    q = np.quantile(r, 1 - alpha)          # quantile côté pertes
+    var = -q
+    cvar = -(r[r <= q].mean()) if (r <= q).any() else np.nan
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Volatilité ann.", f"{ann_vol:.2%}")
+    c2.metric("Rendement ann. (moy)", f"{ann_ret:.2%}")
+    c3.metric("Sharpe (simple)", f"{sharpe:.2f}")
+    c4.metric("Max Drawdown", f"{max_dd:.2%}")
+    c5.metric(f"VaR {int(alpha*100)}%", f"{var:.2%}")
+
+    st.caption("VaR/CVaR = calcul historique sur log-returns journaliers. Sharpe ici sans taux sans risque (MVP).")
+
+    # mini charts
+    st.markdown("### 📉 Drawdown")
+    dd_df = pd.DataFrame({"Date": pd.to_datetime(df_pf_slice["Date"].iloc[1:]), "Drawdown": dd[1:]})
+    st.line_chart(dd_df.set_index("Date"))
+
+    st.markdown("### 📊 Distribution des returns")
+    hist_df = pd.DataFrame({"ret": r.values})
+    st.bar_chart(hist_df["ret"].value_counts(bins=40).sort_index())  # MVP (hist)
+
+    st.markdown("---")
+
+    # =========================================================
+    # B) PRÉDICTION (copie Single Asset mais entrée = df_pf_slice)
+    # =========================================================
+    st.markdown("## 🔮 Prédiction (Portefeuille)")
+
+    horizon = st.selectbox("Horizon (jours)", [1, 5, 10, 20], index=0, key="pf_pred_h")
+    n_lags = st.slider("Lags (features)", 1, 20, 5, key="pf_pred_lags")
+    test_size = st.slider("Taille zone test (%)", 10, 40, 20, key="pf_pred_test") / 100
+    future_steps = st.slider("Projection future (jours)", 5, 60, 20, key="pf_pred_steps")
+
+    # réutilise EXACTEMENT tes fonctions du single asset:
+    # make_features, train_test_split_time, rf_predict_with_ci, linear_predict_with_ci,
+    # returns_to_price_path, rollout_one_step, rf_rollout_paths_fast
+
+    X, y, dates, close_t, close_th = make_features_portfolio(df_pf_slice, horizon=horizon, n_lags=n_lags)
+
+    if len(X) < 120:
+        st.warning("Pas assez de données pour faire test + futur. Augmente la fenêtre.")
+        st.stop()
+
+    X_train, X_test, y_train, y_test, d_train, d_test = train_test_split_time_portfolio(X, y, dates, test_size=test_size)
+    split_idx = int(len(X) * (1 - test_size))
+    close_t_test = close_t.iloc[split_idx:]
+    close_th_test = close_th.iloc[split_idx:]
+
+    model_choice = st.selectbox("Modèle", ["ARIMA", "Linéaire", "Random Forest"], index=0, key="pf_pred_model")
+    alpha_ci = 0.05  # 95%
+
+    st.markdown("### ✅ Zone TEST (réel vs prédiction)")
+
+    if model_choice == "Linéaire":
+        lin = LinearRegression()
+        lin.fit(X_train, y_train)
+        y_pred, y_lo, y_hi = linear_predict_with_ci_portfolio(lin, X_train, y_train, X_test, alpha=alpha_ci)
+
+    elif model_choice == "Random Forest":
+        rf = RandomForestRegressor(n_estimators=300, max_depth=8, random_state=42, n_jobs=-1)
+        rf.fit(X_train, y_train)
+        y_pred, y_lo, y_hi = rf_predict_with_ci_portfolio(rf, X_test, alpha=alpha_ci)
+
+    else:
+        order = st.selectbox("ARIMA(p,d,q)", [(1,0,1), (2,0,2), (5,0,0), (1,0,0)], index=0, key="pf_arima_test")
+        arima = ARIMA(y_train.reset_index(drop=True), order=order)
+        fit = arima.fit()
+        fc = fit.get_forecast(steps=len(y_test))
+        y_pred = fc.predicted_mean.values
+        ci = fc.conf_int(alpha=alpha_ci)
+        y_lo = ci.iloc[:, 0].values
+        y_hi = ci.iloc[:, 1].values
+
+    mae = mean_absolute_error(y_test, y_pred)
+    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+    hit = (np.sign(y_test.values) == np.sign(y_pred)).mean()
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("MAE (retours)", f"{mae:.6f}")
+    c2.metric("RMSE (retours)", f"{rmse:.6f}")
+    c3.metric("Hit rate (direction)", f"{hit*100:.1f}%")
+
+    pred_price = close_t_test * np.exp(y_pred)
+    lo_price   = close_t_test * np.exp(y_lo)
+    hi_price   = close_t_test * np.exp(y_hi)
+
+    real_price = close_th_test
+    d_test_plot = d_test
+
+    fig_test = go.Figure()
+    fig_test.add_trace(go.Scatter(x=d_test_plot, y=real_price, name=f"Réel (Close t+{horizon})", mode="lines"))
+    fig_test.add_trace(go.Scatter(x=d_test_plot, y=pred_price, name="Prédiction", mode="lines"))
+    fig_test.add_trace(go.Scatter(
+        x=np.concatenate([d_test_plot, d_test_plot[::-1]]),
+        y=np.concatenate([hi_price, lo_price[::-1]]),
+        fill="toself", name="IC 95%", mode="lines", line=dict(width=0), opacity=0.2,
+    ))
+    st.plotly_chart(fig_test, use_container_width=True)
+
+    st.markdown("### 🔭 Futur (projection + IC 95%)")
+
+    last_price = df_pf_slice["Close"].iloc[-1]
+    last_date = pd.to_datetime(df_pf_slice["Date"].iloc[-1])
+    future_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=future_steps, freq="B")
+
+    if model_choice == "Linéaire":
+        lin = LinearRegression()
+        lin.fit(X, y)
+
+        cols = list(X.columns)
+        x_curr = X.iloc[-1].values.astype(float).reshape(1, -1)
+
+        y_f = []
+        for _ in range(future_steps):
+            r_hat = float(lin.predict(x_curr)[0])
+            y_f.append(r_hat)
+            x_curr = rollout_one_step_portfolio(x_curr, np.array([r_hat]), cols)
+        y_f = np.array(y_f)
+
+        y_hat_train = lin.predict(X)
+        sigma = (y.values - y_hat_train).std(ddof=1)
+        z = norm.ppf(1 - alpha_ci/2)
+        y_f_lo = y_f - z * sigma
+        y_f_hi = y_f + z * sigma
+
+    elif model_choice == "Random Forest":
+        rf = RandomForestRegressor(n_estimators=300, max_depth=8, random_state=42, n_jobs=-1)
+        rf.fit(X, y)
+        paths = rf_rollout_paths_fast_portfolio(rf, X.iloc[-1], steps=future_steps, n_paths=80)
+
+        y_f = paths.mean(axis=0)
+        y_f_lo = np.quantile(paths, alpha_ci/2, axis=0)
+        y_f_hi = np.quantile(paths, 1 - alpha_ci/2, axis=0)
+
+    else:
+        order = st.selectbox("ARIMA(p,d,q) (futur)", [(1,0,1), (2,0,2), (5,0,0), (1,0,0)], index=0, key="pf_arima_future")
+        arima = ARIMA(y.reset_index(drop=True), order=order)
+        fit = arima.fit()
+        fc = fit.get_forecast(steps=future_steps)
+        y_f = fc.predicted_mean.values
+        ci = fc.conf_int(alpha=alpha_ci)
+        y_f_lo = ci.iloc[:, 0].values
+        y_f_hi = ci.iloc[:, 1].values
+
+    future_price = returns_to_portfolio_path(last_price, y_f)
+    future_price_lo = returns_to_portfolio_path(last_price, y_f_lo)
+    future_price_hi = returns_to_portfolio_path(last_price, y_f_hi)
+
+    hist_tail = df_pf_slice.tail(min(120, len(df_pf_slice)))
+    fig_future = go.Figure()
+    fig_future.add_trace(go.Scatter(x=pd.to_datetime(hist_tail["Date"]), y=hist_tail["Close"], name="Historique", mode="lines"))
+    fig_future.add_trace(go.Scatter(x=future_dates, y=future_price, name=f"{model_choice} (prévision)", mode="lines"))
+    fig_future.add_trace(go.Scatter(
+        x=np.concatenate([future_dates, future_dates[::-1]]),
+        y=np.concatenate([future_price_hi, future_price_lo[::-1]]),
+        fill="toself", name="Zone de Confiance 95%", mode="lines", line=dict(width=0), opacity=0.2
+    ))
+    st.plotly_chart(fig_future, use_container_width=True)
+
+    st.caption("IC rigoureux pour ARIMA. Pour Linéaire/RF : intervalle empirique (résidus/arbres) — MVP.")
