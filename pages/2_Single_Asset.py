@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-
+from modules.ai_reco import best_params_by_sortino
 from modules.data_loader import get_live_price, load_historical_data
 from modules.strategy_single import (
     strategy_buy_and_hold,
@@ -13,7 +13,13 @@ from modules.strategy_single import (
 )
 from modules.preprocessing import build_gated_equity, prepare_ohlc_df, slice_by_date_window
 from modules.plots import plot_equity_gated
-
+from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+import numpy as np
+from statsmodels.tsa.arima.model import ARIMA
+import plotly.graph_objects as go
+from scipy.stats import norm
 
 # =========================================================
 # PAGE — SINGLE ASSET
@@ -45,13 +51,13 @@ bb_window, bb_std = 20, 2.0
 
 # Paramètres spécifiques SMA
 if strategy_choice == "SMA Momentum":
-    short = st.sidebar.number_input("SMA courte (jours) :", 5, 100, 20)
-    long = st.sidebar.number_input("SMA longue (jours) :", 20, 300, 50)
+    short = st.sidebar.number_input("SMA courte (jours) :", 5, 100, 20,key="sma_short")
+    long = st.sidebar.number_input("SMA longue (jours) :", 20, 300, 50,key="sma_long")
 
 # Paramètres spécifiques Bollinger
 if strategy_choice == "Bollinger":
-    bb_window = st.sidebar.number_input("Fenêtre (jours) :", 10, 100, 20)
-    bb_std = st.sidebar.slider("Écarts-types :", 1.0, 3.0, 2.0, step=0.1)
+    bb_window = st.sidebar.number_input("Fenêtre (jours) :", 10, 100, 20,key="bb_window")
+    bb_std = st.sidebar.slider("Écarts-types :", 1.0, 3.0, 2.0, step=0.1,key="bb_std")
 
 lookback = st.sidebar.slider(
     "Nombre de jours d’historique",
@@ -60,20 +66,6 @@ lookback = st.sidebar.slider(
     value=365,
     step=50,
 )
-
-with st.sidebar.form("run_form"):
-    submitted = st.form_submit_button("🚀 Lancer l’analyse")
-
-if not submitted and "run_single" not in st.session_state:
-    st.info("Configure les paramètres puis clique sur **🚀 Lancer l’analyse**.")
-    st.stop()
-
-if submitted:
-    st.session_state["run_single"] = True
-
-if st.sidebar.button("🔄 Reset analyse"):
-    st.session_state.pop("run_single", None)
-    st.rerun()
 
 
 # ------------------------------
@@ -125,6 +117,33 @@ except ValueError:
     st.warning("⚠️ Période trop courte (minimum ~30 jours conseillé).")
     st.stop()
 
+# ------------------------------
+# 💡 IA Suggestion (optimisation Sortino)
+# ------------------------------
+if strategy_choice in ("SMA Momentum", "Bollinger"):
+    with st.sidebar.expander("💡 IA Suggestion", expanded=True):
+        best_params, best_score = best_params_by_sortino(
+            symbol=symbol,
+            start_d=start_d,
+            end_d=end_d,
+            lookback=lookback,
+            strategy_choice=strategy_choice,
+        )
+
+        if best_params:
+            formatted = ", ".join([f"{k}={v}" for k, v in best_params.items()])
+            st.markdown(f"**{formatted}**  \n(Sortino: **{best_score:.2f}**)")
+            if st.button("✅ Appliquer", key="apply_ai"):
+                if strategy_choice == "SMA Momentum":
+                    st.session_state["sma_short"] = int(best_params["short"])
+                    st.session_state["sma_long"] = int(best_params["long"])
+                elif strategy_choice == "Bollinger":
+                    st.session_state["bb_window"] = int(best_params["bb_window"])
+                    st.session_state["bb_std"] = float(best_params["bb_std"])
+                st.rerun()
+        else:
+            st.caption("Aucune suggestion disponible (période/données insuffisantes).")
+
 
 
 
@@ -160,6 +179,114 @@ elif strategy_choice == "Golden Cross":
 
 # Courbe “gated” (BH -> Stratégie -> BH scalé)
 df_strat_gated, start_ts_eff, end_ts_eff = build_gated_equity(df, df_strat, start_d, end_d)
+
+
+def make_features(df_in: pd.DataFrame, horizon: int = 1, n_lags: int = 5):
+    df = df_in.copy().sort_values("Date").reset_index(drop=True)
+
+    df["ret"] = np.log(df["Close"]).diff()
+
+    for i in range(1, n_lags + 1):
+        df[f"ret_lag_{i}"] = df["ret"].shift(i)
+
+    df["vol_10"] = df["ret"].rolling(10).std()
+    df["vol_20"] = df["ret"].rolling(20).std()
+
+    # target log-return horizon
+    df["y"] = np.log(df["Close"].shift(-horizon) / df["Close"])
+
+    # prix t et prix t+h (pour affichage test)
+    df["close_t"] = df["Close"]
+    df["close_th"] = df["Close"].shift(-horizon)
+
+    df = df.dropna().reset_index(drop=True)
+
+    feature_cols = [f"ret_lag_{i}" for i in range(1, n_lags + 1)] + ["vol_10", "vol_20"]
+    X = df[feature_cols]
+    y = df["y"]
+    dates_t = pd.to_datetime(df["Date"])
+    close_t = df["close_t"]
+    close_th = df["close_th"]
+    return X, y, dates_t, close_t, close_th
+
+
+def train_test_split_time(X, y, dates, test_size=0.2):
+    split_idx = int(len(X) * (1 - test_size))
+    return (X.iloc[:split_idx], X.iloc[split_idx:],
+            y.iloc[:split_idx], y.iloc[split_idx:],
+            dates.iloc[:split_idx], dates.iloc[split_idx:])
+
+def rf_predict_with_ci(rf_model, X, alpha=0.05):
+    """
+    IC via la distribution des arbres.
+    """
+    all_tree_preds = np.vstack([est.predict(X) for est in rf_model.estimators_])  # (n_trees, n_samples)
+    mean_pred = all_tree_preds.mean(axis=0)
+    lower = np.quantile(all_tree_preds, alpha/2, axis=0)
+    upper = np.quantile(all_tree_preds, 1 - alpha/2, axis=0)
+    return mean_pred, lower, upper
+
+def linear_predict_with_ci(lin_model, X_train, y_train, X_pred, alpha=0.05):
+    """
+    IC simple: y_hat ± z * sigma_resid (approx gauss).
+    Ce n'est pas un vrai IC des paramètres, mais c'est un intervalle utile produit.
+    """
+    y_hat_train = lin_model.predict(X_train)
+    resid = (y_train.values - y_hat_train)
+    sigma = resid.std(ddof=1)
+    z = norm.ppf(1 - alpha/2)
+    y_hat = lin_model.predict(X_pred)
+    lower = y_hat - z * sigma
+    upper = y_hat + z * sigma
+    return y_hat, lower, upper
+
+def returns_to_price_path(last_price, pred_returns):
+    """
+    Convertit une suite de log-returns en trajectoire de prix.
+    """
+    prices = [last_price]
+    for r in pred_returns:
+        prices.append(prices[-1] * float(np.exp(r)))
+    return np.array(prices[1:])
+
+
+def rollout_one_step(X_mat: np.ndarray, r_next: np.ndarray, cols) -> np.ndarray:
+    cols = list(cols)
+    lag_cols = sorted([c for c in cols if c.startswith("ret_lag_")],
+                      key=lambda s: int(s.split("_")[-1]))
+    lag_idx = [cols.index(c) for c in lag_cols]
+
+    X_new = X_mat.copy()
+    if len(lag_idx) >= 2:
+        X_new[:, lag_idx[1:]] = X_mat[:, lag_idx[:-1]]
+    X_new[:, lag_idx[0]] = r_next
+    return X_new
+
+
+def rf_rollout_paths_fast(rf_model, X_last: pd.Series, steps: int, n_paths: int = 80) -> np.ndarray:
+    """
+    Simule n_paths trajectoires de retours futurs en échantillonnant un arbre à chaque pas.
+    Version rapide: batch + numpy (aucun DataFrame dans la boucle).
+    """
+    cols = list(X_last.index)
+    n_trees = len(rf_model.estimators_)
+    paths = np.zeros((n_paths, steps), dtype=float)
+
+    # (n_paths, n_features) array sans noms
+    x_curr = np.tile(X_last.values.astype(float), (n_paths, 1))
+
+    for t in range(steps):
+        x_np = np.asarray(x_curr, dtype=float)  # IMPORTANT: array (pas df)
+        tree_preds = np.vstack([est.predict(x_np) for est in rf_model.estimators_])  # (n_trees, n_paths)
+
+        idx = np.random.randint(0, n_trees, size=n_paths)
+        r = tree_preds[idx, np.arange(n_paths)]
+        paths[:, t] = r
+
+        x_curr = rollout_one_step(x_curr, r, cols)
+
+    return paths
+
 
 
 # =========================================================
@@ -305,6 +432,180 @@ with tab2:
 
 
 with tab3:
-    st.subheader("🔮 Prédiction")
-    st.info("À venir.")
+    st.subheader("🔮 Prédiction — Test + Futur (avec incertitude)")
 
+    horizon = st.selectbox("Horizon (jours)", [1, 5, 10, 20], index=0)
+    n_lags = st.slider("Lags (features)", 1, 20, 5)
+    test_size = st.slider("Taille zone test (%)", 10, 40, 20) / 100
+    future_steps = st.slider("Projection future (jours)", 5, 60, 20)
+
+    # ===== features / target (retours)
+    X, y, dates, close_t, close_th = make_features(df_slice, horizon=horizon, n_lags=n_lags)
+
+
+    if len(X) < 80:
+        st.warning("Pas assez de données pour faire test + futur. Augmente la fenêtre.")
+        st.stop()
+
+    # ===== split temps
+    X_train, X_test, y_train, y_test, d_train, d_test = train_test_split_time(X, y, dates, test_size=test_size)
+    split_idx = int(len(X) * (1 - test_size))
+    close_t_train, close_t_test = close_t.iloc[:split_idx], close_t.iloc[split_idx:]
+    close_th_train, close_th_test = close_th.iloc[:split_idx], close_th.iloc[split_idx:]
+
+
+    model_choice = st.selectbox("Modèle", ["ARIMA", "Linéaire", "Random Forest"], index=0)
+    alpha = 0.05  # 95%
+
+    # --------------------------------------------------
+    # A) ZONE TEST (vérification)
+    # --------------------------------------------------
+    st.markdown("### ✅ Zone TEST (réel vs prédiction)")
+    # on prédit des retours -> on retransforme en prix pour afficher facilement
+    last_train_price = df_slice.loc[df_slice["Date"] <= d_train.iloc[-1], "Close"].iloc[-1]
+
+    if model_choice == "Linéaire":
+        lin = LinearRegression()
+        lin.fit(X_train, y_train)
+        y_pred, y_lo, y_hi = linear_predict_with_ci(lin, X_train, y_train, X_test, alpha=alpha)
+
+    elif model_choice == "Random Forest":
+        rf = RandomForestRegressor(n_estimators=300, max_depth=8, random_state=42, n_jobs=-1)
+        rf.fit(X_train, y_train)
+        y_pred, y_lo, y_hi = rf_predict_with_ci(rf, X_test, alpha=alpha)
+
+    else:
+        # ARIMA sur y_train (retours)
+        order = st.selectbox("ARIMA(p,d,q)", [(1,0,1), (2,0,2), (5,0,0), (1,0,0)], index=0)
+        arima = ARIMA(y_train.reset_index(drop=True), order=order)
+        fit = arima.fit()
+        fc = fit.get_forecast(steps=len(y_test))
+        y_pred = fc.predicted_mean.values
+        ci = fc.conf_int(alpha=alpha)
+        y_lo = ci.iloc[:, 0].values
+        y_hi = ci.iloc[:, 1].values
+
+    # métriques sur retours
+    mae = mean_absolute_error(y_test, y_pred)
+    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+    hit = (np.sign(y_test.values) == np.sign(y_pred)).mean()
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("MAE (retours)", f"{mae:.6f}")
+    c2.metric("RMSE (retours)", f"{rmse:.6f}")
+    c3.metric("Hit rate (direction)", f"{hit*100:.1f}%")
+
+    # --- PRIX TEST (cohérent avec ta target y = log(Close[t+h] / Close[t]))
+    pred_price = close_t_test * np.exp(y_pred)
+    lo_price   = close_t_test * np.exp(y_lo)
+    hi_price   = close_t_test * np.exp(y_hi)
+
+    real_price = close_th_test  # Close réel à t+h
+    d_test_plot = d_test  # déjà aligné avec X_test/y_test
+
+    fig_test = go.Figure()
+    fig_test.add_trace(go.Scatter(
+        x=d_test_plot, y=real_price,
+        name=f"Réel (Close t+{horizon})", mode="lines"
+    ))
+    fig_test.add_trace(go.Scatter(
+        x=d_test_plot, y=pred_price,
+        name="Prédiction", mode="lines"
+    ))
+    fig_test.add_trace(go.Scatter(
+        x=np.concatenate([d_test_plot, d_test_plot[::-1]]),
+        y=np.concatenate([hi_price, lo_price[::-1]]),
+        fill="toself",
+        name="IC 95%",
+        mode="lines",
+        line=dict(width=0),
+        opacity=0.2,
+    ))
+    st.plotly_chart(fig_test, use_container_width=True)
+
+
+    # --------------------------------------------------
+    # B) FUTUR + INTERVALLE
+    # --------------------------------------------------
+    st.markdown("### 🔭 Futur (projection + IC 95%)")
+
+    # Train sur tout
+    last_price = df_slice["Close"].iloc[-1]
+    last_date = pd.to_datetime(df_slice["Date"].iloc[-1])
+    future_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=future_steps, freq="B")
+
+    if model_choice == "Linéaire":
+        lin = LinearRegression()
+        lin.fit(X, y)
+
+        # rollout multi-steps
+        cols = list(X.columns)
+        x_curr = X.iloc[-1].values.astype(float).reshape(1, -1)  # (1, n_features)
+
+        y_f = []
+        for _ in range(future_steps):
+            r_hat = float(lin.predict(x_curr)[0])  # x_curr est déjà (1, n_features)
+            y_f.append(r_hat)
+            x_curr = rollout_one_step(x_curr, np.array([r_hat]), cols)  # update des lags
+        y_f = np.array(y_f)
+
+        # IC MVP basé sur sigma résiduel (même idée que ton linear_predict_with_ci)
+        y_hat_train = lin.predict(X)
+        sigma = (y.values - y_hat_train).std(ddof=1)
+        z = norm.ppf(1 - alpha/2)
+        y_f_lo = y_f - z * sigma
+        y_f_hi = y_f + z * sigma
+
+    elif model_choice == "Random Forest":
+        rf = RandomForestRegressor(n_estimators=300, max_depth=8, random_state=42, n_jobs=-1)
+        rf.fit(X, y)
+
+        paths = rf_rollout_paths_fast(rf, X.iloc[-1], steps=future_steps, n_paths=80)
+
+
+        y_f = paths.mean(axis=0)
+        y_f_lo = np.quantile(paths, alpha/2, axis=0)
+        y_f_hi = np.quantile(paths, 1 - alpha/2, axis=0)
+
+    else:
+        order = st.selectbox("ARIMA(p,d,q) (futur)", [(1,0,1), (2,0,2), (5,0,0), (1,0,0)], index=0, key="arima_future_order")
+        arima = ARIMA(y.reset_index(drop=True), order=order)
+        fit = arima.fit()
+        fc = fit.get_forecast(steps=future_steps)
+        y_f = fc.predicted_mean.values
+        ci = fc.conf_int(alpha=alpha)
+        y_f_lo = ci.iloc[:, 0].values
+        y_f_hi = ci.iloc[:, 1].values
+
+    future_price = returns_to_price_path(last_price, y_f)
+    future_price_lo = returns_to_price_path(last_price, y_f_lo)
+    future_price_hi = returns_to_price_path(last_price, y_f_hi)
+
+    # historique récent pour contexte
+    hist_tail = df_slice.tail(min(120, len(df_slice)))
+    fig_future = go.Figure()
+    fig_future.add_trace(go.Scatter(
+        x=pd.to_datetime(hist_tail["Date"]),
+        y=hist_tail["Close"],
+        name="Historique",
+        mode="lines"
+    ))
+    fig_future.add_trace(go.Scatter(
+        x=future_dates,
+        y=future_price,
+        name=f"{model_choice} (prévision)",
+        mode="lines"
+    ))
+    fig_future.add_trace(go.Scatter(
+        x=np.concatenate([future_dates, future_dates[::-1]]),
+        y=np.concatenate([future_price_hi, future_price_lo[::-1]]),
+        fill="toself",
+        name="Zone de Confiance 95%",
+        mode="lines",
+        line=dict(width=0),
+        opacity=0.2,
+        showlegend=True,
+    ))
+    st.plotly_chart(fig_future, use_container_width=True)
+
+    st.caption("Note: l'IC est rigoureux pour ARIMA. Pour Linéaire/RF, c'est un intervalle empirique basé sur résidus/arbres (MVP).")
