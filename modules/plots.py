@@ -64,3 +64,66 @@ def plot_equity_gated(
         yaxis_title="Évolution portefeuille (base 1)",
     )
     return fig
+
+def plot_equity_segments(
+    df_curve: pd.DataFrame,
+    segments_df: pd.DataFrame,
+    title: str = "Comparaison des stratégies",
+) -> go.Figure:
+    """
+    df_curve doit contenir: Date, BH, Strategy
+    segments_df contient start/end (dates) pour afficher les périodes actives.
+    """
+    g = df_curve.copy()
+    g["Date"] = pd.to_datetime(g["Date"])
+
+    # --- masque "actif" = union des segments
+    m_active = np.zeros(len(g), dtype=bool)
+
+    if segments_df is not None and not segments_df.empty:
+        seg = segments_df.copy()
+        seg["start"] = pd.to_datetime(seg["start"])
+        seg["end"] = pd.to_datetime(seg["end"])
+
+        for _, r in seg.iterrows():
+            m_active |= (g["Date"] >= r["start"]) & (g["Date"] <= r["end"])
+
+    g["Strat_Active"] = np.where(m_active, g["Strategy"], np.nan)
+    g["Port_BH"]      = np.where(~m_active, g["Strategy"], np.nan)  # BH hors segments (déjà rescalé)
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=g["Date"], y=g["BH"], mode="lines", name="Buy & Hold"))
+    fig.add_trace(go.Scatter(x=g["Date"], y=g["Strat_Active"], mode="lines", name="Stratégie (active)"))
+    fig.add_trace(go.Scatter(x=g["Date"], y=g["Port_BH"], mode="lines", name="Hors segments : Buy&Hold (portefeuille)"))
+
+    # --- marqueurs entrée/sortie pour chaque segment
+    if segments_df is not None and not segments_df.empty:
+        for _, r in seg.iterrows():
+            # on "snap" sur la date la plus proche dans g (au cas où)
+            start = g.loc[g["Date"] >= r["start"], "Date"].iloc[0] if (g["Date"] >= r["start"]).any() else None
+            end   = g.loc[g["Date"] <= r["end"],   "Date"].iloc[-1] if (g["Date"] <= r["end"]).any() else None
+
+            if start is not None:
+                y_start = float(g.loc[g["Date"] == start, "Strategy"].iloc[0])
+                fig.add_trace(go.Scatter(
+                    x=[start], y=[y_start], mode="markers",
+                    marker=dict(size=7, color="#00E676", symbol="circle", line=dict(color="black", width=1)),
+                    name="Entrée", showlegend=False,
+                ))
+
+            if end is not None:
+                y_end = float(g.loc[g["Date"] == end, "Strategy"].iloc[0])
+                fig.add_trace(go.Scatter(
+                    x=[end], y=[y_end], mode="markers",
+                    marker=dict(size=7, color="#FF5252", symbol="circle", line=dict(color="black", width=1)),
+                    name="Sortie", showlegend=False,
+                ))
+
+    fig.update_layout(
+        template="plotly_dark",
+        height=500,
+        title=title,
+        xaxis_title="Date",
+        yaxis_title="Évolution portefeuille (base 1)",
+    )
+    return fig

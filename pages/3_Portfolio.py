@@ -3,6 +3,20 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from modules.data_loader import get_live_price
+from modules.portfolio import load_multi_prices, build_portfolio_close,apply_segments_to_portfolio
+from modules.data_loader import load_historical_data
+from modules.preprocessing import prepare_ohlc_df, slice_by_date_window
+from modules.strategy_single import (
+    strategy_buy_and_hold,
+    strategy_sma,
+    strategy_rsi,
+    strategy_macd,
+    strategy_bollinger,
+    strategy_golden_cross,
+    compute_metrics,
+)
+from modules.plots import plot_equity_segments
+import json
 
 st.title("📊 Portfolio — Multi-Actifs")
 
@@ -67,6 +81,23 @@ with tab1:
 
     total_value = float(df_alloc["amount_eur"].sum())
     df_alloc["weight"] = df_alloc["amount_eur"] / total_value
+    
+    alloc_signature = json.dumps(
+        df_alloc.sort_values("symbol")[["symbol","amount_eur"]].to_dict(orient="records"),
+        sort_keys=True
+    )
+
+    prev_sig = st.session_state.get("alloc_signature")
+
+    if prev_sig != alloc_signature:
+        st.session_state["alloc_signature"] = alloc_signature
+
+        # (optionnel) reset segments quand on change de portefeuille
+        st.session_state["segments_list"] = []
+        st.session_state["segments_df_clean"] = pd.DataFrame()
+
+        # force rerun pour reconstruire df_portfolio avec la nouvelle alloc
+        st.rerun()
 
     # --- KPI ligne propre
     c1, c2, c3 = st.columns([1.2, 1, 1])
@@ -153,6 +184,43 @@ with tab1:
         st.plotly_chart(fig_bar, use_container_width=True)
 
 
+# =========================
+# BUILD PORTFOLIO DATA (shared for tab2 & tab3)
+# =========================
+symbols = df_alloc["symbol"].tolist()
+
+lookback_pf = st.sidebar.slider(
+    "Lookback historique portefeuille (jours)",
+    min_value=200,
+    max_value=5000,
+    value=1500,
+    step=100,
+    key="pf_lookback",
+)
+
+
+@st.cache_data(show_spinner=False)
+def load_multi_prices_cached(symbols_tuple, lookback_pf):
+    return load_multi_prices(
+        load_historical_data_fn=load_historical_data,
+        prepare_ohlc_df_fn=prepare_ohlc_df,
+        symbols=list(symbols_tuple),
+        lookback_days=lookback_pf,
+    )
+
+symbols_tuple = tuple(df_alloc["symbol"].tolist())
+
+df_prices_long = load_multi_prices_cached(symbols_tuple, lookback_pf)
+df_portfolio = build_portfolio_close(df_prices_long, df_alloc)
+
+strategy_map = {
+    "Buy & Hold": strategy_buy_and_hold,
+    "SMA Momentum": strategy_sma,
+    "RSI": strategy_rsi,
+    "MACD": strategy_macd,
+    "Bollinger": strategy_bollinger,
+    "Golden Cross": strategy_golden_cross,
+}
 
 # =========================
 # TAB 2 — STRATEGIES (UI)
@@ -162,17 +230,16 @@ with tab1:
 # =========================
 with tab2:
     st.subheader("📈 Stratégies — Segments (timeline)")
-
     st.markdown("### 📅 Période globale de backtest (slider)")
 
-    min_date = pd.to_datetime("2015-01-01").date()
-    max_date = pd.Timestamp.today().date()
+    min_date = pd.to_datetime(df_portfolio["Date"]).min().date()
+    max_date = pd.to_datetime(df_portfolio["Date"]).max().date()
 
     start_d, end_d = st.slider(
         "Fenêtre de backtest",
         min_value=min_date,
         max_value=max_date,
-        value=(max(min_date, pd.to_datetime("2018-01-01").date()), max_date),
+        value=(min_date, max_date),
         format="YYYY/MM/DD",
         key="pf_backtest_slider",
     )
@@ -261,6 +328,7 @@ with tab2:
             params["sma_short"] = st.number_input("SMA courte", 5, 100, 20, key="seg_sma_short")
         with p2:
             params["sma_long"] = st.number_input("SMA longue", 20, 300, 50, key="seg_sma_long")
+
     elif seg_strategy == "Bollinger":
         p1, p2 = st.columns(2)
         with p1:
@@ -274,37 +342,34 @@ with tab2:
     if add_clicked:
         if seg_start >= seg_end:
             st.error("⚠️ Segment invalide : début >= fin.")
-            st.stop()
+        else:
+            new_start = pd.to_datetime(seg_start).date()
+            new_end = pd.to_datetime(seg_end).date()
 
-        new_start = pd.to_datetime(seg_start).date()
-        new_end = pd.to_datetime(seg_end).date()
+            existing = pd.DataFrame(st.session_state["segments_list"])
+            if not existing.empty:
+                existing["start"] = pd.to_datetime(existing["start"]).dt.date
+                existing["end"] = pd.to_datetime(existing["end"]).dt.date
 
-        existing = pd.DataFrame(st.session_state["segments_list"])
-        if not existing.empty:
-            existing["start"] = pd.to_datetime(existing["start"]).dt.date
-            existing["end"] = pd.to_datetime(existing["end"]).dt.date
+                # overlap si intervals se croisent : (a < d) & (c < b)
+                overlap_mask = (new_start < existing["end"]) & (existing["start"] < new_end)
 
-            # overlap si intervals se croisent : (a < d) & (c < b)
-            # on autorise start == end (collé), donc strict <
-            overlap_mask = (new_start < existing["end"]) & (existing["start"] < new_end)
-            overlap_any = overlap_mask.any()
-
-            if overlap_any:
-                st.error("🚫 Ce segment chevauche un segment existant.")
-                last_end = existing.loc[overlap_mask, "end"].max()
-                st.info(f"💡 Suggestion : mets le **début** du segment à {last_end} (juste après).")
-                st.stop()
-
-        st.session_state["segments_list"].append(
-            {
-                "start": new_start,
-                "end": new_end,
-                "strategy": seg_strategy,
-                **params,
-            }
-        )
-        st.success("✅ Segment ajouté.")
-        st.rerun()
+                if overlap_mask.any():
+                    last_end = existing.loc[overlap_mask, "end"].max()
+                    st.error("🚫 Ce segment chevauche un segment existant.")
+                    st.info(f"💡 Suggestion : mets le **début** du segment à {last_end} (juste après).")
+                else:
+                    st.session_state["segments_list"].append(
+                        {"start": new_start, "end": new_end, "strategy": seg_strategy, **params}
+                    )
+                    st.success("✅ Segment ajouté.")
+                    st.rerun()
+            else:
+                st.session_state["segments_list"].append(
+                    {"start": new_start, "end": new_end, "strategy": seg_strategy, **params}
+                )
+                st.success("✅ Segment ajouté.")
+                st.rerun()
 
     # -----------------------------
     # 🧩 Affichage "cards" + actions
@@ -325,7 +390,7 @@ with tab2:
         seg_df.loc[seg_df["end"] > end_d, "end"] = end_d
         seg_df = seg_df.sort_values("start").reset_index(drop=True)
 
-        # 🚫 INTERDICTION DES CHEVAUCHEMENTS (on autorise start == fin précédente, mais pas <)
+        # 🚫 INTERDICTION DES CHEVAUCHEMENTS
         overlaps = (seg_df["start"].shift(-1) < seg_df["end"])[:-1]
         if overlaps.any():
             i = overlaps[overlaps].index[0]
@@ -335,35 +400,37 @@ with tab2:
                 f"Segment {i+2}: {seg_df.loc[i+1,'start']} → {seg_df.loc[i+1,'end']}\n\n"
                 f"Règle: le segment suivant doit commencer **le jour de fin ou après**."
             )
-            st.stop()
+            st.session_state["segments_df_clean"] = pd.DataFrame()
+            seg_df = None
 
-        for i, row in seg_df.iterrows():
-            left, _, right = st.columns([6, 2, 2])
+        if seg_df is not None:
+            for i, row in seg_df.iterrows():
+                left, _, right = st.columns([6, 2, 2])
 
-            with left:
-                st.markdown(f"**{row['strategy']}** — {row['start']} → {row['end']}")
-                extras = []
+                with left:
+                    st.markdown(f"**{row['strategy']}** — {row['start']} → {row['end']}")
+                    extras = []
 
-                sma_s = row.get("sma_short", np.nan)
-                sma_l = row.get("sma_long", np.nan)
-                if pd.notna(sma_s) and pd.notna(sma_l):
-                    extras.append(f"SMA({int(sma_s)},{int(sma_l)})")
+                    sma_s = row.get("sma_short", np.nan)
+                    sma_l = row.get("sma_long", np.nan)
+                    if pd.notna(sma_s) and pd.notna(sma_l):
+                        extras.append(f"SMA({int(sma_s)},{int(sma_l)})")
 
-                bb_w = row.get("bb_window", np.nan)
-                bb_s = row.get("bb_std", np.nan)
-                if pd.notna(bb_w) and pd.notna(bb_s):
-                    extras.append(f"BB(window={int(bb_w)}, std={float(bb_s)})")
+                    bb_w = row.get("bb_window", np.nan)
+                    bb_s = row.get("bb_std", np.nan)
+                    if pd.notna(bb_w) and pd.notna(bb_s):
+                        extras.append(f"BB(window={int(bb_w)}, std={float(bb_s)})")
 
-                if extras:
-                    st.caption(" · ".join(extras))
+                    if extras:
+                        st.caption(" · ".join(extras))
 
-            with right:
-                if st.button("🗑️ Supprimer", key=f"del_seg_{i}", use_container_width=True):
-                    new_list = seg_df.drop(index=i).to_dict(orient="records")
-                    st.session_state["segments_list"] = new_list
-                    st.rerun()
+                with right:
+                    if st.button("🗑️ Supprimer", key=f"del_seg_{i}", use_container_width=True):
+                        new_list = seg_df.drop(index=i).to_dict(orient="records")
+                        st.session_state["segments_list"] = new_list
+                        st.rerun()
 
-        st.session_state["segments_df_clean"] = seg_df.copy()
+            st.session_state["segments_df_clean"] = seg_df.copy()
 
     # -----------------------------
     # Actions rapides
@@ -380,5 +447,78 @@ with tab2:
 
 
 with tab3:
-    st.subheader("⚡ Simulations / Risque (à implémenter)")
-    st.info("Corrélation, covariance, VaR/CVaR, Monte Carlo…")
+    st.subheader("📊 Backtest — Portefeuille vs Buy & Hold")
+
+    start_d = st.session_state.get("pf_backtest_slider", (None, None))[0]
+    end_d   = st.session_state.get("pf_backtest_slider", (None, None))[1]
+
+    if start_d is None or end_d is None:
+        st.info("Choisis d'abord une fenêtre de backtest dans l'onglet Stratégies.")
+        st.stop()
+
+    try:
+        df_pf_slice = slice_by_date_window(df_portfolio, start_d, end_d, min_points=30)
+    except ValueError:
+        st.warning("⚠️ Fenêtre trop courte (minimum ~30 jours conseillé).")
+        st.stop()
+
+    # 1) Stratégie segmentée (doit renvoyer Date/BH/Strategy)
+    seg_clean = st.session_state.get("segments_df_clean", pd.DataFrame())
+    df_pf_strat = apply_segments_to_portfolio(
+        df_pf_slice,
+        segments_df=seg_clean,
+        strategy_map=strategy_map,
+    )
+
+    # 2) Buy & Hold cohérent (même Date/index)
+    df_pf_bh = df_pf_strat.copy()
+    df_pf_bh["Strategy"] = df_pf_bh["BH"]
+
+
+    # 3) Plot
+    st.markdown("### 📈 Equity curve")
+    df_plot = pd.DataFrame({
+        "Date": pd.to_datetime(df_pf_strat["Date"]),
+        "BH": df_pf_strat["BH"].values,
+        "Strategy": df_pf_strat["Strategy"].values,
+    })
+
+    fig = plot_equity_segments(
+        df_curve=df_plot,
+        segments_df=seg_clean,
+        title="Comparaison des stratégies",
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    # 4) Metrics
+    st.markdown("### 📊 Indicateurs (vs Buy & Hold)")
+    metrics_strat = compute_metrics(df_pf_strat)
+    metrics_bh = compute_metrics(df_pf_bh)
+
+    total_perf_strat = df_pf_strat["Strategy"].iloc[-1] - 1
+    total_perf_bh = df_pf_bh["Strategy"].iloc[-1] - 1
+
+    col1, col2, col3, col4, col5 = st.columns(5)
+
+    sharpe_delta = metrics_strat["Sharpe Ratio"] - metrics_bh["Sharpe Ratio"]
+    col1.metric("Sharpe", f"{metrics_strat['Sharpe Ratio']:.3f}", delta=f"{sharpe_delta:.3f} vs B&H")
+
+    dd_strat_display = f"{metrics_strat['Max Drawdown']*100:.2f}%"
+    dd_bh_display = f"{metrics_bh['Max Drawdown']*100:.2f}%"
+    col2.metric("Max DD", dd_strat_display, delta=f"B&H: {dd_bh_display}")
+
+    vol_delta = metrics_strat["Volatility (ann.)"] - metrics_bh["Volatility (ann.)"]
+    col3.metric("Vol (ann.)", f"{metrics_strat['Volatility (ann.)']:.2%}", delta=f"{vol_delta:.2%} vs B&H")
+
+    perf_delta = total_perf_strat - total_perf_bh
+    col4.metric("Perf totale", f"{total_perf_strat*100:.2f} %", delta=f"{perf_delta*100:.2f} % vs B&H")
+
+    sortino_delta = metrics_strat["Sortino"] - metrics_bh["Sortino"]
+    col5.metric("Sortino", f"{metrics_strat['Sortino']:.3f}", delta=f"{sortino_delta:.3f} vs B&H")
+
+    with st.expander("📘 Détails métriques", expanded=False):
+        df_stats = pd.DataFrame({
+            "Stratégie (segments)": metrics_strat,
+            "Buy & Hold": metrics_bh,
+        })
+        st.dataframe(df_stats, use_container_width=True)
