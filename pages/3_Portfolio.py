@@ -781,10 +781,14 @@ with tab4:
         y_f_lo = ci.iloc[:, 0].values
         y_f_hi = ci.iloc[:, 1].values
 
-    future_price = returns_to_portfolio_path(last_price, y_f)
-    future_price_lo = returns_to_portfolio_path(last_price, y_f_lo)
-    future_price_hi = returns_to_portfolio_path(last_price, y_f_hi)
+    y_f_daily = y_f / horizon
+    y_f_lo_daily = y_f_lo / horizon
+    y_f_hi_daily = y_f_hi / horizon
 
+    future_price = returns_to_portfolio_path(last_price, y_f_daily)
+    future_price_lo = returns_to_portfolio_path(last_price, y_f_lo_daily)
+    future_price_hi = returns_to_portfolio_path(last_price, y_f_hi_daily)
+    
     hist_tail = df_pf_slice.tail(min(120, len(df_pf_slice)))
     fig_future = go.Figure()
     fig_future.add_trace(go.Scatter(x=pd.to_datetime(hist_tail["Date"]), y=hist_tail["Close"], name="Historique", mode="lines"))
