@@ -239,9 +239,7 @@ strategy_map = {
     "Golden Cross": strategy_golden_cross,
 }
 
-# =========================
-# TAB 2 — STRATEGIES (UI)
-# =========================
+
 # =========================
 # TAB 2 — STRATEGIES (UI)
 # =========================
@@ -564,23 +562,35 @@ with tab4:
     # =========================================================
     st.markdown("## 🛡️ Risques")
 
-    # returns (log)
-    r = np.log(df_pf_slice["Close"]).diff().dropna()
+    # --- utiliser la même equity que Tab3 : Strategy segmentée ---
+    seg_clean = st.session_state.get("segments_df_clean", pd.DataFrame())
+    df_pf_strat = apply_segments_to_portfolio(
+        df_pf_slice,
+        segments_df=seg_clean,
+        strategy_map=strategy_map,
+    )
+
+    # --- réutilise EXACTEMENT les métriques de compute_metrics (comme Tab3) ---
+    metrics_strat = compute_metrics(df_pf_strat)
+    ann_vol = metrics_strat["Volatility (ann.)"]
+    sharpe  = metrics_strat["Sharpe Ratio"]
+    max_dd  = metrics_strat["Max Drawdown"]
+
+    # returns (log) sur la courbe Strategy (pour VaR/CVaR + histogramme)
+    r = np.log(df_pf_strat["Strategy"]).diff().dropna()
     if len(r) < 30:
         st.warning("Pas assez de points pour calculer les risques.")
         st.stop()
 
-    ann_vol = r.std() * np.sqrt(252)
+    # Rendement ann. (moy) : on garde ton calcul MVP (moyenne des log-returns annualisée)
     ann_ret = r.mean() * 252
-    sharpe  = ann_ret / (ann_vol + 1e-12)
 
-    # Max drawdown sur Close (ou sur equity, c'est équivalent ici)
-    close = df_pf_slice["Close"].values
+    # Drawdown série (pour le graphique)
+    close = df_pf_strat["Strategy"].values
     peak = np.maximum.accumulate(close)
     dd = close / peak - 1.0
-    max_dd = dd.min()
 
-    # VaR / CVaR (historique)
+    # VaR / CVaR (historique) sur Strategy
     alpha = st.slider("Niveau de confiance VaR/CVaR", 0.90, 0.99, 0.95, 0.01)
     q = np.quantile(r, 1 - alpha)          # quantile côté pertes
     var = -q
@@ -597,7 +607,7 @@ with tab4:
 
     # mini charts
     st.markdown("### 📉 Drawdown")
-    dd_df = pd.DataFrame({"Date": pd.to_datetime(df_pf_slice["Date"].iloc[1:]), "Drawdown": dd[1:]})
+    dd_df = pd.DataFrame({"Date": pd.to_datetime(df_pf_strat["Date"].iloc[1:]), "Drawdown": dd[1:]})
     st.line_chart(dd_df.set_index("Date"))
 
     st.markdown("### 📊 Distribution des returns")
