@@ -31,6 +31,7 @@ from modules.predictions_portfolio import (
     rf_rollout_paths_fast_portfolio,
 )
 from scipy.stats import norm
+import plotly.express as px
 
 
 
@@ -611,8 +612,51 @@ with tab4:
     st.line_chart(dd_df.set_index("Date"))
 
     st.markdown("### 📊 Distribution des returns")
-    hist_df = pd.DataFrame({"ret": r.values})
-    st.bar_chart(hist_df["ret"].value_counts(bins=40).sort_index())  # MVP (hist)
+    
+    # Création de l'histogramme
+    fig_hist = px.histogram(
+        x=r, 
+        nbins=50, 
+        labels={'x': 'Log-Returns', 'y': 'Fréquence'},
+        opacity=0.75,
+        color_discrete_sequence=["#3b82f6"] # Bleu moderne
+    )
+
+    # Ajout de la ligne verticale pour la VaR (Zone de risque)
+    # q a été calculé plus haut : q = np.quantile(r, 1 - alpha)
+    fig_hist.add_vline(
+        x=q, 
+        line_width=2, 
+        line_dash="dash", 
+        line_color="#ef4444", # Rouge
+        annotation_text=f"VaR {int(alpha*100)}%", 
+        annotation_position="top left"
+    )
+
+    # Ajout de la ligne pour la Moyenne
+    fig_hist.add_vline(
+        x=r.mean(), 
+        line_width=2, 
+        line_dash="dot", 
+        line_color="#22c55e", # Vert
+        annotation_text="Moyenne", 
+        annotation_position="top right"
+    )
+
+    fig_hist.update_layout(
+        title={
+            'text': "Distribution des rendements & Seuil de risque",
+            'y':0.95,
+            'x':0.5,
+            'xanchor': 'center',
+            'yanchor': 'top'
+        },
+        bargap=0.1, # Espace entre les barres
+        template="plotly_white",
+        margin=dict(l=20, r=20, t=50, b=20)
+    )
+
+    st.plotly_chart(fig_hist, use_container_width=True)
 
     st.markdown("---")
 
