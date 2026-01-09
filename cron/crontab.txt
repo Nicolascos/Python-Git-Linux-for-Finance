@@ -12,19 +12,23 @@
 # minute hour day_of_month month day_of_week command
 #
 # ---------------------------------------------------------
-# Run every day at 20:57 (VM local time)
+# Run every day at 21:40 (VM local time)
 # ---------------------------------------------------------
 #
-# 57 20 * * * /usr/bin/python3 /ABSOLUTE/PATH/TO/PROJECT/cron/daily_report.py \
-#     >> /ABSOLUTE/PATH/TO/PROJECT/cron/cron.log 2>&1
+# 40 21 * * * cd /ABSOLUTE/PATH/TO/PROJECT && \
+#     ./.venv/bin/python cron/daily_report.py \
+#     >> cron/cron.log 2>&1
 #
 # Notes:
 # - Replace /ABSOLUTE/PATH/TO/PROJECT with the real path
-#   (e.g. /home/user/PYTHON-GIT-LINUX-FOR-FINANCE)
-# - Use `which python3` to confirm the Python interpreter
+#   (e.g. /home/user/Python-Git-Linux-for-Finance)
+# - The virtual environment must exist at .venv/
+# - If needed, verify the interpreter with:
+#     which python
 # - Output is logged to cron/cron.log for debugging
 #
 # The script generates daily reports in:
 #   cron/data/
 #
-# Each run generates reports for the last 30 trading days.
+# Each run generates reports for approximately
+# the last 30 trading days.
