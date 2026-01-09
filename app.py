@@ -1,4 +1,5 @@
 import streamlit as st
+import os
 
 # ---------------------------------------------------------
 # CONFIG STREAMLIT — DOIT ÊTRE EN PREMIER
@@ -62,3 +63,70 @@ Ce dashboard permet de :
 Bon backtest 👨‍💻📈
 """
 )
+
+
+# =========================================================
+# 📂 ESPACE ADMIN (SIDEBAR & VISUALISEUR)
+# =========================================================
+
+if "show_report" not in st.session_state:
+    st.session_state["show_report"] = False
+if "report_content" not in st.session_state:
+    st.session_state["report_content"] = ""
+if "report_name" not in st.session_state:
+    st.session_state["report_name"] = ""
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("📂 Espace Admin")
+
+DATA_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "cron",
+    "data"
+)
+
+report_files = []
+if os.path.exists(DATA_DIR):
+    report_files = sorted([f for f in os.listdir(DATA_DIR) if f.endswith(".txt")], reverse=True)
+
+if report_files:
+    
+    # Labels courts (lisibles) -> vrais noms de fichiers
+    label_to_file = {
+        f.replace("daily_report_", "").replace(".txt", ""): f
+        for f in report_files
+    }
+
+    selected_label = st.sidebar.selectbox(
+        "Choisir un rapport :",
+        list(label_to_file.keys()),
+        key="admin_select_report"
+    )
+
+    selected_report = label_to_file[selected_label]
+
+    
+
+    if st.sidebar.button("Lire le rapport", use_container_width=True):
+        file_path = os.path.join(DATA_DIR, selected_report)
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+              content = f.read()
+            st.session_state["show_report"] = True
+            st.session_state["report_content"] = content
+            st.session_state["report_name"] = selected_report
+        except Exception as e:
+            st.sidebar.error(f"Erreur de lecture : {e}")
+else:
+    st.sidebar.caption("Aucun rapport (.txt) trouvé dans /cron/data.")
+
+if st.session_state["show_report"]:
+    st.markdown("### 📄 Visualiseur de Rapport")
+    st.caption(f"Contenu du fichier : {st.session_state['report_name']}")
+    st.code(st.session_state["report_content"], language="text")
+
+    if st.button("Fermer le rapport"):
+        st.session_state["show_report"] = False
+        st.rerun()
+
+    st.markdown("---")

@@ -1,73 +1,147 @@
-# daily_report.py
-# SCRIPT À EXÉCUTER PAR CRON (Feature 6)
+# cron/daily_report.py
+# SCRIPT A EXECUTER PAR CRON (Feature 6)
 
-import yfinance as yf
-import pandas as pd
-from datetime import date
 import os
 import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from datetime import date
+from pathlib import Path
 
-# Importez la fonction de calcul des métriques de votre module
-# Assurez-vous que le chemin d'importation est correct depuis le contexte d'exécution du cron
+import pandas as pd
+import yfinance as yf
+
+# ---------------------------------------------------------
+# PATHS (portable: marche sur n'importe quelle machine)
+# ---------------------------------------------------------
+CRON_DIR = Path(__file__).resolve().parent           # .../cron
+PROJECT_ROOT = CRON_DIR.parent                       # .../ (racine projet)
+DATA_DIR = CRON_DIR / "data"                         # .../cron/data
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# Pour importer modules/...
+sys.path.insert(0, str(PROJECT_ROOT))
+
 try:
     from modules.strategy_single import compute_metrics
 except ImportError:
-    # Fallback pour exécution standalone si modules n'est pas dans le path
-    print("Avertissement: modules/strategy_single.py non trouvé. Assurez-vous que le PATH est correct pour cron.")
-    exit()
+    print("ERROR: cannot import modules.strategy_single.compute_metrics")
+    print("Make sure you run from the project root OR sys.path is correct.")
+    raise
 
-# --- Paramètres ---
-TICKER = "AAPL" # Actif par défaut pour le rapport
-# Assurez-vous que le dossier 'data/' existe sur la VM
-OUTPUT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', f"daily_report_{TICKER}.txt")
+# ---------------------------------------------------------
+# PARAMETRES
+# ---------------------------------------------------------
+TICKER = os.environ.get("REPORT_TICKER", "AAPL")  # override possible: REPORT_TICKER=MSFT
+TODAY = date.today().isoformat()
 
-def generate_report():
+# 1 fichier par jour (ecrase a chaque run du meme jour)
+OUTPUT_FILE = DATA_DIR / f"daily_report_{TICKER}_{TODAY}.txt"
+
+# Ancien format (legacy) a supprimer pour eviter d'avoir "2 fichiers"
+LEGACY_FILE = DATA_DIR / f"daily_report_{TICKER}.txt"
+
+
+def _flatten_yf_columns(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Télécharge les données et génère un rapport de métriques clés
-    (prix, volatilité, Max Drawdown) et l'enregistre sur le disque.
+    yfinance peut renvoyer un DataFrame avec colonnes MultiIndex (ex: ('Close','AAPL')).
+    On le remet en colonnes simples: Open/High/Low/Close/Adj Close/Volume.
     """
-    today = date.today()
-    
-    # 1. Télécharger les données des 365 derniers jours (pour les métriques annualisées)
+    if isinstance(df.columns, pd.MultiIndex):
+        df = df.copy()
+        df.columns = [c[0] for c in df.columns]
+    return df
+
+
+def _cleanup_error_files() -> None:
+    """
+    Nettoie les rapports ERROR pour éviter d'accumuler des fichiers inutiles dans l'UI.
+    On supprime tous les daily_report_ERROR_{TICKER}_*.txt
+    """
+    pattern_prefix = f"daily_report_ERROR_{TICKER}_"
+    for p in DATA_DIR.glob(f"{pattern_prefix}*.txt"):
+        try:
+            p.unlink()
+        except Exception:
+            pass
+
+
+def generate_report() -> None:
+    # Nettoyage legacy (sinon tu accumules)
+    if LEGACY_FILE.exists():
+        try:
+            LEGACY_FILE.unlink()
+        except Exception:
+            pass
+
+    # Nettoyage des fichiers ERROR (sinon tu as un "error" en trop dans la liste)
+    _cleanup_error_files()
+
     try:
-        # Période large pour avoir des métriques annualisées stables
-        df = yf.download(TICKER, period="1y", interval="1d", progress=False) 
-        
-        if df.empty:
-            raise ValueError("Aucune donnée yfinance récupérée.")
-            
-        # 2. Calculer les métriques (Volatilité & Max Drawdown)
-        # On utilise le prix de clôture comme base (Buy & Hold)
-        df_strat_base = pd.DataFrame({"Strategy": df["Close"]})
-        metrics = compute_metrics(df_strat_base, column="Strategy") 
-        
-        # 3. Récupérer les prix quotidiens récents
-        latest_data = df.iloc[-1]
-        
-        # 4. Écrire le rapport
-        with open(OUTPUT_FILE, "a") as f:
-            f.write(f"\n--- Rapport Quotidien {today} pour {TICKER} ---\n")
-            f.write(f"Prix d'ouverture récent: {latest_data['Open']:.2f} $\n")
-            f.write(f"Prix de clôture récent: {latest_data['Close']:.2f} $\n")
-            f.write(f"Volatilité annualisée (1 an): {metrics['Volatility (ann.)']*100:.2f} %\n")
-            f.write(f"Max Drawdown (1 an): {abs(metrics['Max Drawdown'])*100:.2f} %\n")
-            f.write("-------------------------------------\n")
-            
-        print(f"Rapport généré avec succès dans {OUTPUT_FILE}")
+        # auto_adjust=False pour garder OHLC cohérents
+        df = yf.download(
+            TICKER,
+            period="1y",
+            interval="1d",
+            progress=False,
+            auto_adjust=False,
+        )
+
+        if df is None or df.empty:
+            raise ValueError("No data returned by yfinance (empty dataframe).")
+
+        df = _flatten_yf_columns(df)
+
+        required_cols = {"Open", "Close"}
+        if not required_cols.issubset(set(df.columns)):
+            raise ValueError(
+                f"Missing required columns in yfinance data: {required_cols} not found. "
+                f"Got: {list(df.columns)}"
+            )
+
+        # Close doit etre 1D quoi qu'il arrive
+        close_series = df["Close"]
+        if isinstance(close_series, pd.DataFrame):
+            close_series = close_series.iloc[:, 0]
+        close_1d = pd.to_numeric(close_series, errors="coerce").to_numpy().reshape(-1)
+
+        # On retire les NaN éventuels (sécurité)
+        close_1d = close_1d[~pd.isna(close_1d)]
+        if close_1d.size < 30:
+            raise ValueError("Not enough valid Close points to compute metrics.")
+
+        df_strat_base = pd.DataFrame({"Strategy": close_1d})
+        metrics = compute_metrics(df_strat_base, column="Strategy")
+
+        latest = df.iloc[-1]
+
+        # Ecriture UTF-8, mode "w" => ecrase le fichier du jour a chaque run
+        with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+            f.write(f"DAILY REPORT - {TICKER} - {TODAY}\n")
+            f.write("=" * 40 + "\n")
+            f.write(f"Latest Open : {float(latest['Open']):.2f}\n")
+            f.write(f"Latest Close: {float(latest['Close']):.2f}\n")
+            f.write(f"Annualized Volatility (1y): {float(metrics['Volatility (ann.)']) * 100:.2f} %\n")
+            f.write(f"Max Drawdown (1y): {abs(float(metrics['Max Drawdown'])) * 100:.2f} %\n")
+            f.write("=" * 40 + "\n")
+
+        # Sécurité: si un fichier ERROR du jour existe encore (ex: run précédent planté), on le supprime
+        err_file_today = DATA_DIR / f"daily_report_ERROR_{TICKER}_{TODAY}.txt"
+        if err_file_today.exists():
+            try:
+                err_file_today.unlink()
+            except Exception:
+                pass
+
+        print(f"OK: report written to {OUTPUT_FILE}")
 
     except Exception as e:
-        # En cas d'échec du téléchargement ou du calcul
-        with open(OUTPUT_FILE, "a") as f:
-            f.write(f"\n--- Rapport {today} ---\n")
-            f.write(f"Erreur fatale lors de la génération du rapport pour {TICKER}: {e}\n")
-        print(f"Échec de la génération du rapport: {e}")
+        # En cas d'erreur: on ecrit un fichier erreur du jour (ecrase)
+        err_file = DATA_DIR / f"daily_report_ERROR_{TICKER}_{TODAY}.txt"
+        with open(err_file, "w", encoding="utf-8") as f:
+            f.write(f"ERROR generating report for {TICKER} ({TODAY})\n")
+            f.write(str(e) + "\n")
+
+        print(f"ERROR generating report: {e}")
 
 
 if __name__ == "__main__":
-    # Assurez-vous que le dossier 'data' existe
-    data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
-    if not os.path.exists(data_dir):
-        os.makedirs(data_dir)
-        
     generate_report()
