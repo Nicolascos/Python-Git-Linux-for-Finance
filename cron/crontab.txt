@@ -12,10 +12,10 @@
 # minute hour day_of_month month day_of_week command
 #
 # ---------------------------------------------------------
-# Run every day at 20:00 (VM local time)
+# Run every day at 20:52 (VM local time)
 # ---------------------------------------------------------
 #
-# 0 20 * * * /usr/bin/python3 /ABSOLUTE/PATH/TO/PROJECT/cron/daily_report.py \
+# 52 20 * * * /usr/bin/python3 /ABSOLUTE/PATH/TO/PROJECT/cron/daily_report.py \
 #     >> /ABSOLUTE/PATH/TO/PROJECT/cron/cron.log 2>&1
 #
 # Notes:
@@ -28,3 +28,4 @@
 #   cron/data/
 #
 # Each run generates reports for the last 30 trading days.
+
