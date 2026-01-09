@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
 import numpy as np
-import plotly.graph_objects as go
+
 
 # ---------------------------------------------------------
 # PLOT 1 — Courbe equity (stratégie vs buy&hold)

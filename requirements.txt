@@ -1,12 +1,8 @@
-streamlit==1.39.0
+streamlit
 pandas
 numpy
-plotly
-finnhub-python==2.4.18
-beautifulsoup4
-requests
-scikit-learn
-lightgbm
 yfinance
-html5lib
+plotly
+scikit-learn
+scipy
 statsmodels
