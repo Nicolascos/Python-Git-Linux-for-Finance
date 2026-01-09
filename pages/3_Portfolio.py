@@ -270,34 +270,6 @@ with tab2:
     if "segments_list" not in st.session_state:
         st.session_state["segments_list"] = []  # list[dict]
 
-    # -------------------------------------------------
-    # 👀 Aperçu segments existants (visible AVANT ajout)
-    # -------------------------------------------------
-    segments = st.session_state.get("segments_list", [])
-    if segments:
-        seg_df_preview = pd.DataFrame(segments).copy()
-        seg_df_preview["start"] = pd.to_datetime(seg_df_preview["start"]).dt.date
-        seg_df_preview["end"] = pd.to_datetime(seg_df_preview["end"]).dt.date
-        seg_df_preview = seg_df_preview.sort_values("start").reset_index(drop=True)
-
-        with st.expander("👀 Segments existants", expanded=True):
-            for i, r in seg_df_preview.iterrows():
-                extras = []
-                sma_s = r.get("sma_short", np.nan)
-                sma_l = r.get("sma_long", np.nan)
-                if pd.notna(sma_s) and pd.notna(sma_l):
-                    extras.append(f"SMA({int(sma_s)},{int(sma_l)})")
-
-                bb_w = r.get("bb_window", np.nan)
-                bb_s = r.get("bb_std", np.nan)
-                if pd.notna(bb_w) and pd.notna(bb_s):
-                    extras.append(f"BB(window={int(bb_w)}, std={float(bb_s)})")
-
-                st.markdown(f"**{i+1}. {r['strategy']}** — {r['start']} → {r['end']}")
-                if extras:
-                    st.caption(" · ".join(extras))
-    else:
-        st.info("Aucun segment pour l’instant.")
 
     # -----------------------------
     # ➕ UI builder (ajout segment)
@@ -531,13 +503,6 @@ with tab3:
 
     sortino_delta = metrics_strat["Sortino"] - metrics_bh["Sortino"]
     col5.metric("Sortino", f"{metrics_strat['Sortino']:.3f}", delta=f"{sortino_delta:.3f} vs B&H")
-
-    with st.expander("📘 Détails métriques", expanded=False):
-        df_stats = pd.DataFrame({
-            "Stratégie (segments)": metrics_strat,
-            "Buy & Hold": metrics_bh,
-        })
-        st.dataframe(df_stats, use_container_width=True)
 
 
 with tab4:
