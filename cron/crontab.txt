@@ -12,10 +12,10 @@
 # minute hour day_of_month month day_of_week command
 #
 # ---------------------------------------------------------
-# Run every day at 21:40 (VM local time)
+# Run every day at 20:00 (VM local time)
 # ---------------------------------------------------------
 #
-# 40 21 * * * cd /ABSOLUTE/PATH/TO/PROJECT && \
+# 0 20 * * * cd /ABSOLUTE/PATH/TO/PROJECT && \
 #     ./.venv/bin/python cron/daily_report.py \
 #     >> cron/cron.log 2>&1
 #
