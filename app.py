@@ -131,7 +131,7 @@ else:
         dates_avail = [d for (_, d, _) in reports_ticker]  # déjà triées desc
 
         selected_day = st.sidebar.selectbox(
-            "Jour (30 derniers rapports)",
+            "Jour (Pour avoir accès aux 30 derniers rapport, run le code manuellement)",
             dates_avail,
             format_func=lambda d: d.isoformat(),
             key="admin_day",
