@@ -2,8 +2,8 @@ import pandas as pd
 import numpy as np
 
 
-
 def prepare_ohlc_df(df: pd.DataFrame) -> pd.DataFrame:
+    # Assure une colonne Date (renomme Datetime si besoin) + tri/dedup
     out = df.copy()
     if "Date" not in out.columns and "Datetime" in out.columns:
         out = out.rename(columns={"Datetime": "Date"})
@@ -17,6 +17,7 @@ def prepare_ohlc_df(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def slice_by_date_window(df: pd.DataFrame, start_d, end_d, min_points: int = 30) -> pd.DataFrame:
+    # Extrait une fenêtre [start_d, end_d] avec un minimum de points
     start_d = pd.Timestamp(start_d).date()
     end_d = pd.Timestamp(end_d).date()
 
@@ -32,7 +33,7 @@ def slice_by_date_window(df: pd.DataFrame, start_d, end_d, min_points: int = 30)
 def normalize_dedup_date(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
 
-    # 1) Si Date est déjà une colonne
+    # 1) Cas standard : Date en colonne
     if "Date" in out.columns:
         out["Date"] = pd.to_datetime(out["Date"]).dt.normalize()
         out = out.sort_values("Date")
@@ -40,7 +41,7 @@ def normalize_dedup_date(df: pd.DataFrame) -> pd.DataFrame:
         out = out.reset_index(drop=True)
         return out
 
-    # 2) Sinon, on considère que la date est dans l'index (souvent DatetimeIndex)
+    # 2) Sinon : Date dans l'index (DatetimeIndex attendu)
     idx = out.index
     if not isinstance(idx, pd.DatetimeIndex):
         idx = pd.to_datetime(idx, errors="coerce")
@@ -51,9 +52,10 @@ def normalize_dedup_date(df: pd.DataFrame) -> pd.DataFrame:
     out = out.sort_index()
     out = out[~out.index.duplicated(keep="first")]
 
-    # remettre une vraie colonne Date
+    # Remet Date en colonne
     out = out.reset_index().rename(columns={"index": "Date"})
     return out
+
 
 def build_gated_equity(df_full: pd.DataFrame,
                        df_strat_slice: pd.DataFrame,
@@ -67,18 +69,18 @@ def build_gated_equity(df_full: pd.DataFrame,
     Retourne: out, start_ts_eff, end_ts_eff
     """
 
+    # Nettoyage + déduplication sur Date
     out = normalize_dedup_date(df_full)
     out["Date"] = pd.to_datetime(out["Date"]).dt.normalize()
     out = out.sort_values("Date").drop_duplicates(subset=["Date"]).reset_index(drop=True)
 
-    # Close propre
+    # Série Close (garde-fou si Close est un DataFrame)
     close = out["Close"]
     if isinstance(close, pd.DataFrame):
         close = close.iloc[:, 0]
 
+    # Rendements journaliers + Buy&Hold (base 1)
     out["Returns"] = close.pct_change().fillna(0.0)
-
-    # Buy&Hold "sous-jacent" sur toute la période (base 1)
     out["BH"] = (1.0 + out["Returns"]).cumprod()
 
     # --- stratégie (fenêtre) ---
@@ -86,6 +88,7 @@ def build_gated_equity(df_full: pd.DataFrame,
     strat["Date"] = pd.to_datetime(strat["Date"]).dt.normalize()
     strat = strat.sort_values("Date").drop_duplicates(subset=["Date"])
 
+    # Position : priorise Position, sinon Signal (shifté d’un jour)
     if "Position" in strat.columns:
         pos_s = strat.set_index("Date")["Position"].astype(float)
     elif "Signal" in strat.columns:
@@ -95,7 +98,7 @@ def build_gated_equity(df_full: pd.DataFrame,
 
     out_i = out.set_index("Date")
 
-    # snap start/end au plus proche jour disponible
+    # Snap start/end sur les dates réellement présentes dans out_i
     start_ts = pd.Timestamp(start_d).normalize()
     end_ts   = pd.Timestamp(end_d).normalize()
 
@@ -107,27 +110,24 @@ def build_gated_equity(df_full: pd.DataFrame,
 
     active = (out_i.index >= start_ts_eff) & (out_i.index <= end_ts_eff)
 
-    # positions alignées sur tout l’index
+    # Positions alignées sur l’index complet (0 hors fenêtre par défaut)
     pos_aligned = pos_s.reindex(out_i.index).fillna(0.0)
 
-    # 1) perf stratégie RELATIVE (base 1) uniquement sur la fenêtre
+    # 1) Performance relative de la stratégie (base 1) sur la fenêtre uniquement
     r = out_i["Returns"]
     strat_rel = pd.Series(1.0, index=out_i.index)
 
-    # cumprod dans la fenêtre (ancrée à 1 au début de fenêtre)
     strat_rel.loc[active] = (1.0 + r.loc[active] * pos_aligned.loc[active]).cumprod()
-    strat_rel.loc[active] /= strat_rel.loc[start_ts_eff]  # force = 1 à l'entrée
+    strat_rel.loc[active] /= strat_rel.loc[start_ts_eff]  # ancre à 1 à l’entrée
 
-    # 2) ancrage sur BH à l’entrée
+    # 2) Ancrage sur la valeur BH à l’entrée
     bh_start = float(out_i.loc[start_ts_eff, "BH"])
     strategy_window = bh_start * strat_rel
 
-    # 3) hors fenêtre : BH avant, BH scalé après pour continuité
-    out_i["Strategy"] = out_i["BH"]  # avant start => BH
-
+    # 3) Construction de la courbe finale (BH avant, stratégie pendant, BH scalé après)
+    out_i["Strategy"] = out_i["BH"]
     out_i.loc[active, "Strategy"] = strategy_window.loc[active]
 
-    # scale après end pour garder la perf atteinte
     strat_end = float(out_i.loc[end_ts_eff, "Strategy"])
     bh_end = float(out_i.loc[end_ts_eff, "BH"])
     scale = strat_end / bh_end if bh_end != 0 else 1.0

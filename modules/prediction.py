@@ -39,7 +39,7 @@ def train_test_split_time(X, y, dates, test_size=0.2):
 
 def rf_predict_with_ci(rf_model, X, alpha=0.05):
     """
-    IC via la distribution des arbres.
+    Intervalle de confiance via la distribution des arbres.
     """
     all_tree_preds = np.vstack([est.predict(X) for est in rf_model.estimators_])  # (n_trees, n_samples)
     mean_pred = all_tree_preds.mean(axis=0)

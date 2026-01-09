@@ -40,6 +40,7 @@ st.title("📈 Analyse d’un Actif Unique — Quant A")
 # ------------------------------
 st.sidebar.subheader("⚙️ Paramètres de l’analyse")
 
+# Univers d'actifs / tickers disponibles
 ticker_dict = {
     "Actions US 🇺🇸": ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA"],
     "Crypto(prix pas à jour) 💎": ["BTC-USD", "ETH-USD", "SOL-USD"],
@@ -49,25 +50,27 @@ ticker_dict = {
 categorie = st.sidebar.selectbox("Catégorie d’actifs :", list(ticker_dict.keys()))
 symbol = st.sidebar.selectbox("Ticker :", ticker_dict[categorie])
 
+# Choix de stratégie (affiche ensuite les paramètres associés)
 strategy_choice = st.sidebar.selectbox(
     "Stratégie :",
     ["Buy & Hold", "SMA Momentum", "RSI", "MACD", "Bollinger", "Golden Cross"],
 )
 
-# Defaults (évite short/long/bb_* non définis)
+# Valeurs par défaut (évite variables non définies selon le choix)
 short, long = 20, 50
 bb_window, bb_std = 20, 2.0
 
 # Paramètres spécifiques SMA
 if strategy_choice == "SMA Momentum":
-    short = st.sidebar.number_input("SMA courte (jours) :", 5, 100, 20,key="sma_short")
-    long = st.sidebar.number_input("SMA longue (jours) :", 20, 300, 50,key="sma_long")
+    short = st.sidebar.number_input("SMA courte (jours) :", 5, 100, 20, key="sma_short")
+    long = st.sidebar.number_input("SMA longue (jours) :", 20, 300, 50, key="sma_long")
 
 # Paramètres spécifiques Bollinger
 if strategy_choice == "Bollinger":
-    bb_window = st.sidebar.number_input("Fenêtre (jours) :", 10, 100, 20,key="bb_window")
-    bb_std = st.sidebar.slider("Écarts-types :", 1.0, 3.0, 2.0, step=0.1,key="bb_std")
+    bb_window = st.sidebar.number_input("Fenêtre (jours) :", 10, 100, 20, key="bb_window")
+    bb_std = st.sidebar.slider("Écarts-types :", 1.0, 3.0, 2.0, step=0.1, key="bb_std")
 
+# Profondeur d'historique à charger
 lookback = st.sidebar.slider(
     "Nombre de jours d’historique",
     min_value=100,
@@ -76,19 +79,18 @@ lookback = st.sidebar.slider(
     step=50,
 )
 
-
 # ------------------------------
 # 1. Chargement des données
 # ------------------------------
-
 df = load_historical_data(symbol, lookback_days=lookback)
 
+# Stop propre si pas de données
 if df is None or df.empty:
     st.error(f"❌ Impossible de récupérer des données historiques pour {symbol}.")
     st.stop()
 
+# Normalisation OHLC + Date
 df = prepare_ohlc_df(df)
-
 
 # ------------------------------
 # 1.b Fenêtre (Date d'entrée / sortie)
@@ -98,7 +100,7 @@ st.sidebar.subheader("📅 Période d'analyse")
 min_d = df["Date"].min().date()
 max_d = df["Date"].max().date()
 
-# Deux date pickers (calendrier) : Début / Fin
+# Sélection dates analyse
 start_d = st.sidebar.date_input(
     "Début",
     value=min_d,
@@ -115,11 +117,12 @@ end_d = st.sidebar.date_input(
     format="YYYY/MM/DD",
 )
 
-# Sécurité si l'utilisateur inverse les dates
+# Garde-fou si l'utilisateur inverse les dates
 if start_d > end_d:
     st.sidebar.error("⚠️ La date de début doit être avant la date de fin.")
     st.stop()
 
+# Slice sur la période (min_points évite fenêtres trop courtes)
 try:
     df_slice = slice_by_date_window(df, start_d, end_d, min_points=30)
 except ValueError:
@@ -129,6 +132,7 @@ except ValueError:
 # ------------------------------
 # 💡 IA Suggestion (optimisation Sortino)
 # ------------------------------
+# Propose des paramètres optimaux uniquement pour SMA/Bollinger (grid search)
 if strategy_choice in ("SMA Momentum", "Bollinger"):
     with st.sidebar.expander("💡 IA Suggestion", expanded=True):
         best_params, best_score = best_params_by_sortino(
@@ -139,6 +143,7 @@ if strategy_choice in ("SMA Momentum", "Bollinger"):
             strategy_choice=strategy_choice,
         )
 
+        # Affichage + application dans session_state (puis rerun)
         if best_params:
             formatted = ", ".join([f"{k}={v}" for k, v in best_params.items()])
             st.markdown(f"**{formatted}**  \n(Sortino: **{best_score:.2f}**)")
@@ -153,26 +158,19 @@ if strategy_choice in ("SMA Momentum", "Bollinger"):
         else:
             st.caption("Aucune suggestion disponible (période/données insuffisantes).")
 
-
-
-
 # ------------------------------
 # 2. Application des stratégies
 # ------------------------------
+# Buy&Hold sur fenêtre et sur période complète (utile pour visu "gated")
+df_bh_full = strategy_buy_and_hold(df)
+df_bh = strategy_buy_and_hold(df_slice)
 
-
-# Buy & Hold
-df_bh_full = strategy_buy_and_hold(df)      # pour BH global / visu
-df_bh = strategy_buy_and_hold(df_slice)     # pour comparaison sur fenêtre
-
-# Stratégie choisie
+# Application de la stratégie choisie sur la fenêtre uniquement
 if strategy_choice == "Buy & Hold":
     df_strat = df_bh.copy()
-    
 
 elif strategy_choice == "SMA Momentum":
     df_strat = strategy_sma(df_slice, short=short, long=long)
-    
 
 elif strategy_choice == "RSI":
     df_strat = strategy_rsi(df_slice)
@@ -186,13 +184,8 @@ elif strategy_choice == "Bollinger":
 elif strategy_choice == "Golden Cross":
     df_strat = strategy_golden_cross(df_slice)
 
-# Courbe “gated” (BH -> Stratégie -> BH scalé)
+# Courbe “gated” : BH avant -> stratégie pendant -> BH scalé après
 df_strat_gated, start_ts_eff, end_ts_eff = build_gated_equity(df, df_strat, start_d, end_d)
-
-
-
-
-
 
 # =========================================================
 # TABS
@@ -200,7 +193,7 @@ df_strat_gated, start_ts_eff, end_ts_eff = build_gated_equity(df, df_strat, star
 tab1, tab2, tab3 = st.tabs(["📊 Performance", "⚡ Comparaison", "🔮 Prédiction"])
 
 with tab1:
-    # Prix live
+    # Prix live (affichage informatif)
     live_price = get_live_price(symbol)
     if live_price is not None:
         st.subheader(f"🏷️ Prix Actuel {symbol} : **{live_price:,.2f} $**")
@@ -208,17 +201,17 @@ with tab1:
     else:
         st.error(f"❌ Impossible de récupérer le prix live pour {symbol}.")
 
-    # Données historiques
+    # Aperçu données
     st.subheader("📡 Données historiques")
     st.success(
         f"Données chargées pour {symbol} du {df['Date'].iloc[0].date()} au {df['Date'].iloc[-1].date()}"
     )
     st.dataframe(df.tail(), use_container_width=True)
 
-    # Info période
+    # Résumé période
     st.info(f"📆 Analyse sur la période : {start_d} → {end_d} ({len(df_slice)} points)")
 
-    # Stratégie utilisée
+    # Paramètres stratégie (si applicable)
     st.subheader("🧠 Stratégie appliquée")
     if strategy_choice == "SMA Momentum":
         st.write(f"Stratégie utilisée : **{strategy_choice}** — courte={short}, longue={long}")
@@ -227,7 +220,7 @@ with tab1:
     else:
         st.write(f"Stratégie utilisée : **{strategy_choice}**")
 
-    # Graph principal
+    # Courbe equity principale
     st.subheader("📈 Performance — Stratégie vs Buy & Hold")
     fig_equity = plot_equity_gated(
         df_strat_gated=df_strat_gated,
@@ -240,7 +233,7 @@ with tab1:
         "Après la date de sortie, le portefeuille repasse en Buy&Hold en conservant la performance atteinte à la sortie."
     )
 
-    # Metrics cards
+    # Métriques stratégie vs BH (sur fenêtre)
     st.subheader("📊 Indicateurs quantitatifs")
 
     metrics_strat = compute_metrics(df_strat)
@@ -270,13 +263,14 @@ with tab1:
 # =========================================================
 # 🔥 COMPARAISON MULTI-STRATÉGIES
 # =========================================================
-
+# Stratégies "baseline" calculées avec paramètres standards pour comparer
 df_sma = strategy_sma(df_slice, short=20, long=50)
 df_rsi = strategy_rsi(df_slice)
 df_macd = strategy_macd(df_slice)
 df_bb = strategy_bollinger(df_slice, window=20, num_std=2)
 df_gc = strategy_golden_cross(df_slice)
 
+# DataFrame des courbes (alignées sur Date)
 df_compare = pd.DataFrame(
     {
         "Buy & Hold": df_bh["Strategy"].values,
@@ -289,15 +283,12 @@ df_compare = pd.DataFrame(
     index=pd.to_datetime(df_slice["Date"]),
 )
 
-# conseillé : enlever les lignes incomplètes (rolling windows)
+# On enlève les lignes incomplètes (rolling windows)
 df_compare = df_compare.dropna(how="any")
-
 
 # =========================================================
 # 📊 TABLEAU DES METRICS POUR TOUTES LES STRATÉGIES
 # =========================================================
-
-
 strategies_results = {
     "Buy & Hold": df_bh,
     "SMA": df_sma,
@@ -307,6 +298,7 @@ strategies_results = {
     "Golden Cross": df_gc,
 }
 
+# Construction table récap (métriques + perf totale)
 table_stats = []
 for name, df_s in strategies_results.items():
     metrics = compute_metrics(df_s)
@@ -327,14 +319,12 @@ df_stats = (
     .sort_values("Sharpe Ratio", ascending=False)
 )
 
-
 with tab2:
     st.subheader("⚡ Comparaison Multi-Stratégies")
     st.line_chart(df_compare)
 
     st.subheader("📘 Tableau de synthèse des performances")
     st.dataframe(df_stats, use_container_width=True)
-
 
 with tab3:
     st.subheader("🔮 Prédiction — Test + Futur (avec incertitude)")
@@ -344,29 +334,29 @@ with tab3:
     test_size = st.slider("Taille zone test (%)", 10, 40, 20) / 100
     future_steps = st.slider("Projection future (jours)", 5, 60, 20)
 
-    # ===== features / target (retours)
+    # Features/target : retours (log) + dates + close[t] / close[t+h]
     X, y, dates, close_t, close_th = make_features(df_slice, horizon=horizon, n_lags=n_lags)
 
-
+    # Garde-fou : pas assez d'observations => pas de modèle
     if len(X) < 80:
         st.warning("Pas assez de données pour faire test + futur. Augmente la fenêtre.")
         st.stop()
 
-    # ===== split temps
+    # Split temporel (train -> test)
     X_train, X_test, y_train, y_test, d_train, d_test = train_test_split_time(X, y, dates, test_size=test_size)
     split_idx = int(len(X) * (1 - test_size))
     close_t_train, close_t_test = close_t.iloc[:split_idx], close_t.iloc[split_idx:]
     close_th_train, close_th_test = close_th.iloc[:split_idx], close_th.iloc[split_idx:]
 
-
     model_choice = st.selectbox("Modèle", ["ARIMA", "Linéaire", "Random Forest"], index=0)
     alpha = 0.05  # 95%
 
     # --------------------------------------------------
-    # A) ZONE TEST (vérification)
+    # A) ZONE TEST (réel vs prédiction)
     # --------------------------------------------------
     st.markdown("### ✅ Zone TEST (réel vs prédiction)")
-    # on prédit des retours -> on retransforme en prix pour afficher facilement
+
+    # Dernier prix train (utile si besoin de reconstruire un chemin)
     last_train_price = df_slice.loc[df_slice["Date"] <= d_train.iloc[-1], "Close"].iloc[-1]
 
     if model_choice == "Linéaire":
@@ -390,7 +380,7 @@ with tab3:
         y_lo = ci.iloc[:, 0].values
         y_hi = ci.iloc[:, 1].values
 
-    # métriques sur retours
+    # Métriques sur retours
     mae = mean_absolute_error(y_test, y_pred)
     rmse = np.sqrt(mean_squared_error(y_test, y_pred))
     hit = (np.sign(y_test.values) == np.sign(y_pred)).mean()
@@ -400,14 +390,15 @@ with tab3:
     c2.metric("RMSE (retours)", f"{rmse:.6f}")
     c3.metric("Hit rate (direction)", f"{hit*100:.1f}%")
 
-    # --- PRIX TEST (cohérent avec ta target y = log(Close[t+h] / Close[t]))
+    # Reconstruction en prix (cohérent avec y = log(Close[t+h] / Close[t]))
     pred_price = close_t_test * np.exp(y_pred)
     lo_price   = close_t_test * np.exp(y_lo)
     hi_price   = close_t_test * np.exp(y_hi)
 
-    real_price = close_th_test  # Close réel à t+h
-    d_test_plot = d_test  # déjà aligné avec X_test/y_test
+    real_price = close_th_test
+    d_test_plot = d_test
 
+    # Plot : réel vs prédiction + intervalle
     fig_test = go.Figure()
     fig_test.add_trace(go.Scatter(
         x=d_test_plot, y=real_price,
@@ -428,13 +419,12 @@ with tab3:
     ))
     st.plotly_chart(fig_test, use_container_width=True)
 
-
     # --------------------------------------------------
     # B) FUTUR + INTERVALLE
     # --------------------------------------------------
     st.markdown("### 🔭 Futur (projection + IC 95%)")
 
-    # Train sur tout
+    # Base future : dates ouvrées + dernier prix connu
     last_price = df_slice["Close"].iloc[-1]
     last_date = pd.to_datetime(df_slice["Date"].iloc[-1])
     future_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=future_steps, freq="B")
@@ -443,18 +433,18 @@ with tab3:
         lin = LinearRegression()
         lin.fit(X, y)
 
-        # rollout multi-steps
+        # Rollout multi-steps sur les features (lags)
         cols = list(X.columns)
-        x_curr = X.iloc[-1].values.astype(float).reshape(1, -1)  # (1, n_features)
+        x_curr = X.iloc[-1].values.astype(float).reshape(1, -1)
 
         y_f = []
         for _ in range(future_steps):
-            r_hat = float(lin.predict(x_curr)[0])  # x_curr est déjà (1, n_features)
+            r_hat = float(lin.predict(x_curr)[0])
             y_f.append(r_hat)
-            x_curr = rollout_one_step(x_curr, np.array([r_hat]), cols)  # update des lags
+            x_curr = rollout_one_step(x_curr, np.array([r_hat]), cols)
         y_f = np.array(y_f)
 
-        # IC MVP basé sur sigma résiduel (même idée que ton linear_predict_with_ci)
+        # IC simple basé sur sigma résiduel (MVP)
         y_hat_train = lin.predict(X)
         sigma = (y.values - y_hat_train).std(ddof=1)
         z = norm.ppf(1 - alpha/2)
@@ -465,15 +455,21 @@ with tab3:
         rf = RandomForestRegressor(n_estimators=300, max_depth=8, random_state=42, n_jobs=-1)
         rf.fit(X, y)
 
+        # Paths bootstrap via arbres (intervalle empirique)
         paths = rf_rollout_paths_fast(rf, X.iloc[-1], steps=future_steps, n_paths=80)
-
 
         y_f = paths.mean(axis=0)
         y_f_lo = np.quantile(paths, alpha/2, axis=0)
         y_f_hi = np.quantile(paths, 1 - alpha/2, axis=0)
 
     else:
-        order = st.selectbox("ARIMA(p,d,q) (futur)", [(1,0,1), (2,0,2), (5,0,0), (1,0,0)], index=0, key="arima_future_order")
+        # ARIMA sur y (retours) puis forecast direct + IC statsmodels
+        order = st.selectbox(
+            "ARIMA(p,d,q) (futur)",
+            [(1,0,1), (2,0,2), (5,0,0), (1,0,0)],
+            index=0,
+            key="arima_future_order"
+        )
         arima = ARIMA(y.reset_index(drop=True), order=order)
         fit = arima.fit()
         fc = fit.get_forecast(steps=future_steps)
@@ -482,11 +478,12 @@ with tab3:
         y_f_lo = ci.iloc[:, 0].values
         y_f_hi = ci.iloc[:, 1].values
 
+    # Conversion retours -> chemin de prix
     future_price = returns_to_price_path(last_price, y_f)
     future_price_lo = returns_to_price_path(last_price, y_f_lo)
     future_price_hi = returns_to_price_path(last_price, y_f_hi)
 
-    # historique récent pour contexte
+    # Plot futur + historique récent
     hist_tail = df_slice.tail(min(120, len(df_slice)))
     fig_future = go.Figure()
     fig_future.add_trace(go.Scatter(
